@@ -104,7 +104,7 @@ def in_library():
         tid = t.get("id")
         if tid is None:
             continue
-        found[str(tid)] = plex.find_track(t.get("artist", ""), t.get("title", "")) is not None
+        found[str(tid)] = plex.in_library(t.get("artist", ""), t.get("title", ""))
     return jsonify({"configured": True, "found": found})
 
 
@@ -275,7 +275,7 @@ def wantlist():
         return jsonify({"configured": False, "tracks": []})
     out = []
     for r in store.get_distinct_tracks(cap=600):
-        if plex.find_track(r["artist"], r["title"]) is None:
+        if not plex.in_library(r["artist"], r["title"]):
             out.append(r)
             if len(out) >= 200:
                 break

@@ -37,8 +37,15 @@ def _norm(s: str) -> str:
     return s
 
 
-def find_track(artist: str, title: str) -> dict | None:
-    """Return {'part_key', 'duration', 'rating_key', 'title', 'artist'} or None."""
+def _query_title(title: str) -> str:
+    """A search string Plex will actually match: parentheticals dropped, trimmed."""
+    return re.sub(r"\(.*?\)|\[.*?\]", "", title or "").strip()
+
+
+def _lookup(artist: str, title: str) -> dict | None:
+    """Best library candidate for (artist, title), or None. The returned dict has
+    rating_key / part_key (part_key may be None when the item has no streamable
+    part) / duration / title / artist. Cached per normalized (artist, title)."""
     if not configured():
         return None
 
@@ -46,10 +53,21 @@ def find_track(artist: str, title: str) -> dict | None:
     if ck in _cache:
         return _cache[ck]
 
+    want_artist, want_title = ck
+    if not want_title:
+        _cache[ck] = None
+        return None
+
     try:
         resp = requests.get(
             f"{PLEX_BASE_URL}/search",
-            params={"query": f"{artist} {title}".strip(), "type": PLEX_MUSIC_TYPE},
+            # Search by TITLE ONLY. Plex track search matches the query against
+            # the track title, so folding the artist into the query ("Pink Floyd
+            # Signs of Life") makes tracks that ARE in the library return
+            # nothing -- the classic false "not in Plex". We filter the
+            # candidates by artist ourselves, below.
+            params={"query": _query_title(title) or title,
+                    "type": PLEX_MUSIC_TYPE, "limit": 50},
             headers=_headers(),
             timeout=PLEX_TIMEOUT,
         )
@@ -57,38 +75,58 @@ def find_track(artist: str, title: str) -> dict | None:
         items = (resp.json().get("MediaContainer") or {}).get("Metadata") or []
     except (requests.RequestException, ValueError) as e:
         log.warning("Plex search failed for %s - %s: %s", artist, title, e)
-        return None  # deliberately not cached: transient failure
+        return None  # transient failure: deliberately not cached
 
-    want_artist, want_title = ck
-    best = None
+    best = None       # a match that also has a streamable part
+    best_any = None   # a metadata match (existence), part or not
     for item in items:
         item_title = _norm(item.get("title", ""))
         item_artist = _norm(item.get("grandparentTitle", ""))
         if not item_title:
             continue
+        # Titles/artists rarely match char-for-char (remaster suffixes, "feat.",
+        # punctuation), so compare on the normalized forms and allow either to
+        # contain the other. Artist must corroborate, which keeps it honest.
+        title_ok = (item_title == want_title
+                    or want_title in item_title or item_title in want_title)
+        artist_ok = (not want_artist
+                     or want_artist in item_artist or item_artist in want_artist)
+        if not (title_ok and artist_ok):
+            continue
         exact = item_title == want_title and item_artist == want_artist
-        loose = want_title and want_title in item_title and (
-            not want_artist or want_artist in item_artist
-        )
-        if exact or (loose and best is None):
-            media = (item.get("Media") or [{}])[0]
-            part = (media.get("Part") or [{}])[0]
-            if not part.get("key"):
-                continue
-            best = {
-                "rating_key": item.get("ratingKey"),
-                "part_key": part["key"],
-                "duration": int((item.get("duration") or 0) / 1000) or None,
-                "title": item.get("title"),
-                "artist": item.get("grandparentTitle"),
-            }
-            if exact:
-                break
+        media = (item.get("Media") or [{}])[0]
+        part = (media.get("Part") or [{}])[0]
+        cand = {
+            "rating_key": item.get("ratingKey"),
+            "part_key": part.get("key"),
+            "duration": int((item.get("duration") or 0) / 1000) or None,
+            "title": item.get("title"),
+            "artist": item.get("grandparentTitle"),
+        }
+        if best_any is None or exact:
+            best_any = cand
+        if cand["part_key"] and (best is None or exact):
+            best = cand
+        if exact and cand["part_key"]:
+            break
 
-    if best is None:
+    result = best or best_any
+    if result is None:
         log.info("No Plex match for %s - %s", artist, title)
-    _cache[ck] = best
-    return best
+    _cache[ck] = result
+    return result
+
+
+def find_track(artist: str, title: str) -> dict | None:
+    """A streamable match (guaranteed part_key) -- for streaming and M3U export."""
+    m = _lookup(artist, title)
+    return m if m and m.get("part_key") else None
+
+
+def in_library(artist: str, title: str) -> bool:
+    """Whether the library has this track at all, streamable or not. Used by the
+    want-list and the per-row 'in Plex' badge -- existence, not playability."""
+    return _lookup(artist, title) is not None
 
 
 def open_stream(part_key: str, range_header: str | None = None) -> requests.Response:
