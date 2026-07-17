@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>plexamp-stereo — documentation</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .doc { max-width: 900px; margin: 0 auto; padding: 8px 4px 80px; }
+    .doc h1 { font-family: var(--legend); letter-spacing: .04em; font-size: 30px; margin: 6px 0 2px; }
+    .doc .sub { color: var(--ink-dim); margin: 0 0 26px; }
+    .doc h2 {
+      font-family: var(--legend); letter-spacing: .03em; font-size: 21px;
+      margin: 40px 0 10px; padding-top: 14px; border-top: 1px solid var(--hairline);
+    }
+    .doc h3 { font-size: 16px; margin: 22px 0 6px; color: var(--ink); }
+    .doc p, .doc li { color: #cfd3d9; }
+    .doc a { color: var(--lamp); }
+    .doc code {
+      font-family: var(--meter); font-size: 12.5px;
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 2px; padding: 1px 5px; color: var(--ink);
+    }
+    .doc pre {
+      background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--r);
+      padding: 12px 14px; overflow-x: auto; font-family: var(--meter); font-size: 12.5px;
+      color: var(--ink); line-height: 1.5;
+    }
+    .doc pre code { background: none; border: 0; padding: 0; }
+    .doc table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+    .doc th, .doc td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+    .doc th { font-family: var(--legend); letter-spacing: .06em; text-transform: uppercase; font-size: 11px; color: var(--ink-dim); }
+    .doc td code { white-space: nowrap; }
+    .doc .toc { columns: 2; column-gap: 30px; margin: 0 0 10px; padding: 0; list-style: none; }
+    .doc .toc a { text-decoration: none; }
+    .doc .toc li { padding: 3px 0; }
+    .doc .note { border-left: 2px solid var(--lamp); background: var(--lamp-glow); padding: 8px 12px; border-radius: 0 2px 2px 0; margin: 12px 0; }
+    .doc .back { display: inline-block; margin-bottom: 18px; color: var(--ink-dim); text-decoration: none; font-family: var(--legend); letter-spacing: .1em; text-transform: uppercase; font-size: 11px; }
+    .doc .back:hover { color: var(--lamp); }
+    .doc .pill { font-family: var(--meter); font-size: 11px; color: var(--signal); border: 1px solid currentColor; border-radius: 2px; padding: 0 5px; }
+    .doc .opt { color: var(--ink-faint); font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="doc">
+  <a class="back" id="backLink" href="/">&larr; Back to the console</a>
+  <h1>plexamp&thinsp;·&thinsp;stereo</h1>
+  <p class="sub">Continuous line-in music recognition, logging, and browsing. Full feature reference.</p>
+
+  <ul class="toc">
+    <li><a href="#overview">1. Overview</a></li>
+    <li><a href="#pipeline">2. How recognition works</a></li>
+    <li><a href="#local">3. Local recognition cache</a></li>
+    <li><a href="#covers">4. Cover art storage</a></li>
+    <li><a href="#web">5. Web console</a></li>
+    <li><a href="#corrections">6. Corrections</a></li>
+    <li><a href="#integrations">7. Integrations</a></li>
+    <li><a href="#durability">8. Durability</a></li>
+    <li><a href="#api">9. HTTP API</a></li>
+    <li><a href="#config">10. Configuration</a></li>
+    <li><a href="#setup">11. Setup &amp; running</a></li>
+  </ul>
+
+  <h2 id="overview">1. Overview</h2>
+  <p>The daemon listens to a line-in audio device, and every few seconds records a short
+  segment, identifies the music playing, and logs it to a MySQL database. It drives an
+  optional small framebuffer display (album art via <code>feh</code>) and serves this web
+  console for browsing history, statistics, and playlists. Identification uses Shazam,
+  backed by a local fingerprint cache so repeats are recognized without a network call.</p>
+  <p>Everything is configured through <code>AR_*</code> environment variables (see
+  <a href="#config">§10</a>); secrets never live in the source. Feature areas that need
+  credentials — Plex, Last.fm scrobbling, Home Assistant, alerts — are inert until
+  configured, so a bare install still records, displays, and serves the archive.</p>
+
+  <h2 id="pipeline">2. How recognition works</h2>
+  <p>The capture loop runs continuously:</p>
+  <ol>
+    <li><b>Capture &amp; normalize.</b> A <code>RECORD_DURATION</code>-second segment is recorded
+      from <code>ALSA_DEVICE</code> and loudness-normalized. Two buffers ping-pong, so the next
+      segment records while the current one is being identified — there's no dead gap.</li>
+    <li><b>Identify.</b> The segment is fingerprinted and checked against the
+      <a href="#local">local cache</a> first; on a miss it goes to Shazam.</li>
+    <li><b>Vote &amp; lock.</b> Results feed an exponential-moving-average vote keyed on a
+      <i>normalized</i> identity (accents folded, <code>(Remaster)</code>/<code>[Live]</code>
+      and <code>feat.</code> variants collapsed), so spelling variants don't split the vote.
+      A track "locks" once its weight crosses <code>EMA_THRESHOLD</code>.</li>
+    <li><b>Enrich.</b> On lock, album/genre/duration that Shazam left blank are filled from
+      Last.fm (with a MusicBrainz duration fallback). Duration is what makes the Now Playing
+      progress dial work. Local-cache hits already carry this and skip the lookup.</li>
+    <li><b>Record &amp; show.</b> The play is written to the database (timestamped in UTC),
+      pushed to Now Playing, optionally scrobbled/published, and the art is shown on the
+      display.</li>
+  </ol>
+  <p>When the room goes quiet for <code>SILENCE_RESET_SEGMENTS</code> consecutive segments,
+  Now Playing clears and the vote resets — so the same song heard again after a real gap is
+  logged as a new play, and the <code>listened_seconds</code> of the play just ended is
+  finalized.</p>
+
+  <h2 id="local">3. Local recognition cache <span class="pill">no network</span></h2>
+  <p>Every segment Shazam identifies is fingerprinted with <b>Chromaprint</b> (the
+  <code>fpcalc</code> tool behind AcoustID/MusicBrainz) and the fingerprint is stored against
+  that track. On later segments the app fingerprints the audio and matches it against what
+  it has stored; a close match returns the cached identity and <b>skips Shazam entirely</b>.</p>
+  <p>Matching stays fast as the library grows via an inverted index — a query only
+  bit-compares against a handful of candidate fingerprints, not the whole corpus. Up to
+  <code>FP_MAX_PER_TRACK</code> reference fingerprints are kept per track (different parts of a
+  song fingerprint differently, so several references raise the hit rate over time). The
+  acceptance bar is <code>FP_MATCH_THRESHOLD</code> (similarity 0–1); same audio scores ~0.9+,
+  unrelated audio ~0.5, so the default is conservative and uncertain segments fall back to
+  Shazam rather than risk a mislabel.</p>
+  <div class="note">Requires the <code>fpcalc</code> binary
+  (<code>sudo apt install libchromaprint-tools</code>). If it isn't installed, local
+  recognition stays off automatically and every segment goes to Shazam, exactly as before.
+  It's a cache, not a replacement: a brand-new track, or a part of a song not yet
+  fingerprinted, still needs Shazam once.</div>
+
+  <h2 id="covers">4. Cover art storage <span class="pill">no network</span></h2>
+  <p>Shazam's cover URLs expire, which would eventually blank out a large archive. When a
+  track is identified, its art is re-encoded to a capped JPEG and stored in <b>two</b> places:
+  a disk cache and the database (<code>cover_blobs</code>, keyed by a hash of the source URL so
+  plays sharing art share one blob). The database copy is the durable source of truth; the
+  disk cache is a fast front layer that is rebuilt from the database if lost.</p>
+  <p>The console serves art from <code>/cover/&lt;id&gt;</code> and the physical display pulls
+  from the same cache — both resolve disk → database → one-time download. After art has been
+  seen once, neither ever touches the internet for it again. Toggle DB storage with
+  <code>AR_COVER_DB</code>.</p>
+
+  <h2 id="web">5. Web console</h2>
+  <h3>Now Playing</h3>
+  <p>Live panel showing art, title, artist, album/genre, and a context line — <i>play #N ·
+  last heard &lt;date&gt;</i>. The dial fills against the track duration; when duration is
+  unknown it sweeps in a "scanning" state rather than sitting at zero. The signal lamp lights
+  when audio is currently present.</p>
+  <h3>Tracks</h3>
+  <p>The full archive, one row per play, with infinite scroll. Search by title/artist/album,
+  filter by genre, and sort by recently played, most played, artist, title, album, or first
+  heard. <b>Merge variants</b> folds remasters/live/<code>feat.</code> versions of the same
+  song into one row. Each row shows whether the track is in your Plex library, streaming
+  search links (Spotify, Apple Music, TIDAL), and a <b>Fix</b> button (see
+  <a href="#corrections">§6</a>). Click a row with an album to reveal album trivia.</p>
+  <h3>History</h3>
+  <p>Chronological play-by-play, grouped by day.</p>
+  <h3>Want-list</h3>
+  <p>Distinct tracks you've heard that are <i>not</i> in your Plex library — an acquisition
+  list — with streaming links and a <b>Copy list</b> button that copies
+  <code>Artist - Title</code> lines to the clipboard. Requires Plex to be configured.</p>
+  <h3>Stats</h3>
+  <p>Totals (plays, tracks, artists, albums, hours listened) plus <b>match rate</b> (7-day
+  local+Shazam segment recognition rate), current <b>day streak</b>, and listening
+  <b>sessions</b>. A 24-hour clock shows when you listen (weighted by minutes, not play
+  counts), followed by top artists/albums/tracks, genres, artists first heard this week, and
+  a GitHub-style calendar heatmap of the last year colored by listening minutes per day.</p>
+  <h3>Selection actions</h3>
+  <p>Select rows (or "select all matching") to <b>Download playlist</b> as an M3U of the
+  matching tracks found in Plex, or <b>Add to Plex playlist</b> to create/append a real Plex
+  audio playlist from them.</p>
+
+  <h2 id="corrections">6. Corrections <span class="pill">self-healing</span></h2>
+  <p>Shazam mishears sometimes. The <b>Fix</b> button on any row relabels that track as
+  <code>Artist - Title</code>. This does three things: renames the play, back-relabels every
+  existing play that matched the wrong identity, and stores a raw→canonical mapping that is
+  applied automatically to all <i>future</i> recognitions — so the same misidentification is
+  corrected before it's ever logged wrong again.</p>
+
+  <h2 id="integrations">7. Integrations</h2>
+  <p>All optional; each is inert until its variables are set.</p>
+  <h3>Plex</h3>
+  <p>With <code>AR_PLEX_BASE_URL</code> and <code>AR_PLEX_TOKEN</code>, the console checks each
+  track against your library, streams in-library tracks through a token-free
+  <code>/stream/&lt;id&gt;</code> proxy, exports M3U playlists, and creates/append Plex audio
+  playlists.</p>
+  <h3>Last.fm scrobbling</h3>
+  <p>Set <code>AR_SCROBBLE=1</code> plus <code>AR_LASTFM_API_KEY</code>,
+  <code>AR_LASTFM_SECRET</code>, and a one-time session key. Get the session key with:</p>
+  <pre><code>AR_LASTFM_API_KEY=... AR_LASTFM_SECRET=... \
+    python -m audio_recognition.scrobble</code></pre>
+  <p>Follow the printed URL, authorize, and set the printed
+  <code>AR_LASTFM_SESSION_KEY</code>. A play scrobbles once it has run for at least
+  <code>AR_SCROBBLE_MIN_SECONDS</code> and past Last.fm's half-track / 4-minute rule.</p>
+  <h3>Home Assistant / now-playing publish</h3>
+  <p><code>AR_NOWPLAYING_WEBHOOK</code> receives the current track as JSON on every change
+  (point it at an HA webhook trigger). If <code>paho-mqtt</code> is installed and
+  <code>AR_MQTT_HOST</code> is set, a retained message is also published to
+  <code>AR_MQTT_TOPIC</code>.</p>
+  <h3>Watchdog alerts</h3>
+  <p>Set <code>AR_WATCHDOG_SILENCE_MIN</code> &gt; 0 to fire a one-shot alert when no audio is
+  seen for that many minutes during <code>AR_ACTIVE_HOURS</code> — catching an unplugged
+  stereo or dead capture device. Alerts go to <code>AR_NOTIFY_URL</code> (a JSON webhook, or an
+  ntfy topic URL).</p>
+  <h3>Prometheus metrics</h3>
+  <p><code>/metrics</code> exposes <code>ar_plays_total</code>, <code>ar_tracks_total</code>,
+  <code>ar_recognition_rate</code>, <code>ar_signal_age_seconds</code>,
+  <code>ar_now_playing</code>, and <code>ar_up</code> for Grafana/alerting.</p>
+
+  <h2 id="durability">8. Durability</h2>
+  <p>If the database is unavailable when a play is recorded, the play is appended to a local
+  JSONL spool (<code>AR_DB_SPOOL_FILE</code>) and replayed, in order and with its original
+  timestamp, on the next successful write — so a MySQL restart mid-session doesn't punch holes
+  in the history. Schema migrations run automatically at startup; new columns and tables are
+  created if missing.</p>
+
+  <h2 id="api">9. HTTP API</h2>
+  <p>All routes honor the optional auth token (<a href="#setup">§11</a>): send it as
+  <code>?token=</code> or an <code>X-Auth-Token</code> header.</p>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+    <tr><td>GET</td><td><code>/</code></td><td>Web console (SPA)</td></tr>
+    <tr><td>GET</td><td><code>/docs</code></td><td>This page</td></tr>
+    <tr><td>GET</td><td><code>/api/now_playing</code></td><td>Current track + context</td></tr>
+    <tr><td>GET</td><td><code>/archive_data</code></td><td>Tracks view (search/sort/merge, paged)</td></tr>
+    <tr><td>GET</td><td><code>/api/history</code></td><td>Chronological plays (paged)</td></tr>
+    <tr><td>GET</td><td><code>/api/genres</code></td><td>Genre filter options</td></tr>
+    <tr><td>GET</td><td><code>/api/stats</code></td><td>All statistics (totals, clock, tops, calendar, recognition, sessions)</td></tr>
+    <tr><td>GET</td><td><code>/api/matching_ids</code></td><td>IDs matching current filters (for select-all)</td></tr>
+    <tr><td>POST</td><td><code>/api/in_library</code></td><td>Batch Plex library check</td></tr>
+    <tr><td>DELETE</td><td><code>/api/play/&lt;id&gt;</code></td><td>Delete one play</td></tr>
+    <tr><td>POST</td><td><code>/api/forget</code></td><td>Forget a track (all its plays)</td></tr>
+    <tr><td>POST</td><td><code>/api/fix</code></td><td>Relabel + remember a correction</td></tr>
+    <tr><td>GET</td><td><code>/api/wantlist</code></td><td>Heard-but-not-in-Plex tracks</td></tr>
+    <tr><td>POST</td><td><code>/download_playlist</code></td><td>M3U of selected in-library tracks</td></tr>
+    <tr><td>POST</td><td><code>/create_plex_playlist</code></td><td>Create/append a Plex audio playlist</td></tr>
+    <tr><td>GET</td><td><code>/stream/&lt;id&gt;</code></td><td>Token-free Plex stream proxy</td></tr>
+    <tr><td>GET</td><td><code>/cover/&lt;id&gt;</code>, <code>/cover/now</code></td><td>Cover art (disk→DB→source)</td></tr>
+    <tr><td>GET</td><td><code>/album_trivia</code></td><td>Album trivia for a row</td></tr>
+    <tr><td>GET</td><td><code>/healthz</code></td><td>Liveness: signal age, recognition rate, Plex</td></tr>
+    <tr><td>GET</td><td><code>/metrics</code></td><td>Prometheus metrics</td></tr>
+  </table>
+
+  <h2 id="config">10. Configuration</h2>
+  <p>Every setting is an environment variable. Only <code>AR_DB_PASSWORD</code> is strictly
+  required. Load a <code>.env</code> before launch (systemd <code>EnvironmentFile=</code> or
+  <code>python-dotenv</code>); an <code>.env.example</code> ships in the repo.</p>
+
+  <h3>Capture &amp; recognition</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_ALSA_DEVICE</code></td><td><code>hw:1,0</code></td><td>ALSA capture device</td></tr>
+    <tr><td><code>AR_RECORD_DURATION</code></td><td><code>6</code></td><td>Seconds per segment</td></tr>
+    <tr><td><code>AR_SAMPLE_RATE</code></td><td><code>44100</code></td><td>Capture sample rate</td></tr>
+    <tr><td><code>AR_SILENCE_THRESHOLD_DB</code></td><td><code>-45</code></td><td>Below this dBFS a segment counts as silence</td></tr>
+    <tr><td><code>AR_SILENCE_RESET_SEGMENTS</code></td><td><code>5</code></td><td>Silent segments before Now Playing clears</td></tr>
+    <tr><td><code>AR_SHAZAM_TIMEOUT</code></td><td><code>10</code></td><td>Shazam request timeout (s)</td></tr>
+    <tr><td><code>AR_EMA_ALPHA</code></td><td><code>0.5</code></td><td>Vote smoothing (0–1)</td></tr>
+    <tr><td><code>AR_EMA_THRESHOLD</code></td><td><code>0.7</code></td><td>Vote weight needed to lock</td></tr>
+  </table>
+
+  <h3>Local recognition &amp; covers</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_LOCAL_RECOGNITION</code></td><td><code>1</code></td><td>Use the fingerprint cache before Shazam</td></tr>
+    <tr><td><code>AR_FP_MATCH_THRESHOLD</code></td><td><code>0.78</code></td><td>Similarity to accept a local match</td></tr>
+    <tr><td><code>AR_FP_MAX_PER_TRACK</code></td><td><code>8</code></td><td>Reference fingerprints kept per track</td></tr>
+    <tr><td><code>AR_FP_LENGTH_SEC</code></td><td><code>10</code></td><td>Seconds fpcalc hashes per segment</td></tr>
+    <tr><td><code>AR_COVER_CACHE</code></td><td><code>1</code></td><td>Enable the cover cache</td></tr>
+    <tr><td><code>AR_COVER_DB</code></td><td><code>1</code></td><td>Also store covers in the database</td></tr>
+    <tr><td><code>AR_COVER_MAX_PX</code></td><td><code>500</code></td><td>Max cover edge (px)</td></tr>
+  </table>
+
+  <h3>Database</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_DB_HOST</code></td><td><code>localhost</code></td><td>MySQL host</td></tr>
+    <tr><td><code>AR_DB_PORT</code></td><td><code>3306</code></td><td>MySQL port</td></tr>
+    <tr><td><code>AR_DB_USER</code></td><td><code>musicuser</code></td><td>MySQL user</td></tr>
+    <tr><td><code>AR_DB_PASSWORD</code></td><td class="opt">— required —</td><td>MySQL password</td></tr>
+    <tr><td><code>AR_DB_NAME</code></td><td><code>music_log</code></td><td>Database name</td></tr>
+    <tr><td><code>AR_DB_SPOOL_FILE</code></td><td class="opt">~/.local/state/…jsonl</td><td>Outage spool path</td></tr>
+  </table>
+
+  <h3>Web</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_FLASK_HOST</code></td><td><code>127.0.0.1</code></td><td>Bind address (loopback by default)</td></tr>
+    <tr><td><code>AR_FLASK_PORT</code></td><td><code>8000</code></td><td>Bind port</td></tr>
+    <tr><td><code>AR_WEB_TOKEN</code></td><td class="opt">unset</td><td>Shared secret required on all routes</td></tr>
+  </table>
+
+  <h3>Plex, Last.fm &amp; enrichment</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_PLEX_BASE_URL</code></td><td class="opt">unset</td><td>Plex server URL</td></tr>
+    <tr><td><code>AR_PLEX_TOKEN</code></td><td class="opt">unset</td><td>Plex token (playlists/streaming)</td></tr>
+    <tr><td><code>AR_LASTFM_API_KEY</code></td><td class="opt">unset</td><td>Enrichment + scrobble API key</td></tr>
+    <tr><td><code>AR_ENRICH</code></td><td><code>1</code></td><td>Fill album/genre/duration on lock</td></tr>
+    <tr><td><code>AR_ENRICH_MUSICBRAINZ</code></td><td><code>1</code></td><td>MusicBrainz duration fallback</td></tr>
+  </table>
+
+  <h3>Scrobbling, publishing &amp; alerts</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>AR_SCROBBLE</code></td><td><code>0</code></td><td>Enable Last.fm scrobbling</td></tr>
+    <tr><td><code>AR_LASTFM_SECRET</code></td><td class="opt">unset</td><td>Last.fm shared secret</td></tr>
+    <tr><td><code>AR_LASTFM_SESSION_KEY</code></td><td class="opt">unset</td><td>One-time Last.fm session key</td></tr>
+    <tr><td><code>AR_NOWPLAYING_WEBHOOK</code></td><td class="opt">unset</td><td>JSON now-playing webhook</td></tr>
+    <tr><td><code>AR_MQTT_HOST</code></td><td class="opt">unset</td><td>MQTT broker (needs paho-mqtt)</td></tr>
+    <tr><td><code>AR_WATCHDOG_SILENCE_MIN</code></td><td><code>0</code></td><td>Silence minutes before an alert (0 = off)</td></tr>
+    <tr><td><code>AR_ACTIVE_HOURS</code></td><td><code>0-24</code></td><td>Local hours the watchdog is armed</td></tr>
+    <tr><td><code>AR_NOTIFY_URL</code></td><td class="opt">unset</td><td>Alert webhook / ntfy topic</td></tr>
+  </table>
+  <p class="opt">Timeouts, display geometry, fonts, normalization headroom, pool size, and a
+  few other knobs also exist — see <code>audio_recognition/config.py</code> for the complete
+  annotated list.</p>
+
+  <h2 id="setup">11. Setup &amp; running</h2>
+  <h3>Dependencies</h3>
+  <ul>
+    <li><b>System:</b> <code>alsa-utils</code> (arecord), <code>ffmpeg</code> (pydub),
+      <code>libchromaprint-tools</code> (fpcalc, for local recognition), <code>feh</code> +
+      a TrueType font (for the display), and a MySQL/MariaDB server.</li>
+    <li><b>Python:</b> <code>pip install -r requirements.txt</code>
+      (shazamio, mysql-connector-python, requests, Pillow, pydub, Flask; optional
+      <code>paho-mqtt</code> for MQTT).</li>
+  </ul>
+  <h3>Database</h3>
+  <p>Create the database and user, grant privileges, and set <code>AR_DB_PASSWORD</code>. The
+  base <code>recognized_songs</code> table plus all feature tables
+  (<code>corrections</code>, <code>segment_counts</code>, <code>known_tracks</code>,
+  <code>fingerprints</code>, <code>cover_blobs</code>) and the <code>listened_seconds</code>
+  column are created/migrated automatically at startup.</p>
+  <h3>Run</h3>
+  <pre><code>python -m audio_recognition        # recognizer + web console
+# console: http://127.0.0.1:8000/</code></pre>
+  <p>For unattended use, run it under systemd with an <code>EnvironmentFile=</code> holding the
+  <code>AR_*</code> variables.</p>
+  <h3>Access &amp; security</h3>
+  <p>The console binds to loopback by default. To expose it on the LAN, put a reverse proxy in
+  front <b>and</b> set <code>AR_WEB_TOKEN</code> — then every request needs
+  <code>?token=…</code> or an <code>X-Auth-Token</code> header. The token flows through the
+  console's own links automatically.</p>
+</div>
+<script>
+  // Preserve the auth token on the "back" link if one is in the URL.
+  (function () {
+    var t = new URLSearchParams(location.search).get("token");
+    if (t) document.getElementById("backLink").href = "/?token=" + encodeURIComponent(t);
+  })();
+</script>
+</body>
+</html>

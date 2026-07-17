@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>plexamp-stereo</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="shell">
+
+  <div class="faceplate">
+    <div class="brand">
+      <span class="lamp" id="lamp" title="Signal"></span>
+      <span class="name">plexamp&thinsp;·&thinsp;stereo</span>
+      <span class="spacer"></span>
+      <span class="count meter" id="brandCount"></span>
+      <a class="docslink" id="docsLink" href="/docs" target="_blank" rel="noopener">Docs</a>
+      {% if login_enabled %}<a class="docslink" id="logoutLink" href="/logout">Log&nbsp;out</a>{% endif %}
+    </div>
+
+    <div class="now">
+      <div class="well" id="npWell"><span class="empty">No signal</span></div>
+      <div>
+        <div class="legend" id="npLegend">Standby</div>
+        <div class="title" id="npTitle">Nothing playing</div>
+        <div class="by" id="npBy">The room is quiet.</div>
+        <div class="ctx meter" id="npCtx" hidden></div>
+        <div class="dial" id="npDial" hidden>
+          <div class="ticks">
+            <div class="fill" id="npFill"></div>
+            <div class="needle" id="npNeedle"></div>
+          </div>
+          <div class="times">
+            <span id="npElapsed">0:00</span>
+            <span id="npDuration">--:--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rail" role="tablist">
+      <button class="tab" role="tab" data-view="tracks"  aria-selected="true">Tracks</button>
+      <button class="tab" role="tab" data-view="history" aria-selected="false">History</button>
+      <button class="tab" role="tab" data-view="wantlist" aria-selected="false">Want-list</button>
+      <button class="tab" role="tab" data-view="stats"   aria-selected="false">Stats</button>
+      <span class="spacer"></span>
+      <input type="search" id="q" placeholder="Search title, artist, album" autocomplete="off" />
+      <select id="genre"><option value="">All genres</option></select>
+      <select id="sort">
+        <option value="recent">Recently played</option>
+        <option value="plays">Most played</option>
+        <option value="artist">Artist A–Z</option>
+        <option value="title">Title A–Z</option>
+        <option value="album">Album A–Z</option>
+        <option value="oldest">First heard</option>
+      </select>
+      <button class="btn" id="mergeBtn" title="Merge remasters and live versions into one row">Merge variants</button>
+    </div>
+
+    <div class="selbar" id="selbar" hidden>
+      <span><span class="n" id="selCount">0</span> selected</span>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn" id="selectAll">Select all matching</button>
+      <button class="btn" id="clearSel">Clear</button>
+      <button class="btn" id="createPl">Add to Plex playlist</button>
+      <button class="btn primary" id="download">Download playlist</button>
+    </div>
+  </div>
+
+  <div class="list" id="list"></div>
+  <div class="msg" id="msg" hidden></div>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const TOKEN = new URLSearchParams(location.search).get("token") || "";
+  const authed = (u) => TOKEN ? u + (u.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN) : u;
+  const hdrs = (h = {}) => TOKEN ? { ...h, "X-Auth-Token": TOKEN } : h;
+  const get = (u) => fetch(authed(u), { headers: hdrs() });
+
+  const mmss = (s) => {
+    if (s == null || s < 0) return "--:--";
+    const m = Math.floor(s / 60), r = Math.floor(s % 60);
+    return `${m}:${String(r).padStart(2, "0")}`;
+  };
+
+  const fmtDur = (min) => {
+    min = Math.round(min || 0);
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  // Local calendar day, not toISOString() -- that's UTC and would shift the
+  // day boundary against the server's already-localized DATE() buckets.
+  const dayKey = (dt) =>
+    `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+
+  // GitHub-style heatmap: one cell per day for ~53 weeks, coloured by minutes
+  // listened. Cells fill column-by-column (a week per column) via CSS grid.
+  function buildCalendar(cal) {
+    if (!cal.length) return "";
+    const by = new Map(cal.map((d) => [d.day, d]));
+    let max = 0;
+    cal.forEach((d) => { if (d.minutes > max) max = d.minutes; });
+    const lvl = (m) => {
+      if (!m) return 0;
+      const r = m / (max || 1);
+      return r > 0.66 ? 4 : r > 0.4 ? 3 : r > 0.15 ? 2 : 1;
+    };
+    const end = new Date(); end.setHours(12, 0, 0, 0);
+    const cur = new Date(end);
+    cur.setDate(cur.getDate() - 7 * 52 - end.getDay());   // back to a Sunday
+    const cells = [];
+    while (cur <= end) {
+      const k = dayKey(cur), rec = by.get(k);
+      const m = rec ? rec.minutes : 0, p = rec ? rec.plays : 0;
+      cells.push(`<i class="cal-c l${lvl(m)}" title="${k} — ${fmtDur(m)} · ${p} plays"></i>`);
+      cur.setDate(cur.getDate() + 1);
+    }
+    return `
+      <div class="card wide">
+        <h3 class="legend">Listening by day</h3>
+        <div class="cal">${cells.join("")}</div>
+        <div class="cal-key"><span>Less</span>
+          <i class="cal-c l1"></i><i class="cal-c l2"></i>
+          <i class="cal-c l3"></i><i class="cal-c l4"></i><span>More</span></div>
+      </div>`;
+  }
+
+  // ── now playing ────────────────────────────────────────────────────────
+  let np = null, npTick = 0;
+
+  function paintNow() {
+    if (!np || !np.playing) {
+      $("lamp").classList.remove("on");
+      $("npWell").innerHTML = '<span class="empty">No signal</span>';
+      $("npLegend").textContent = "Standby";
+      $("npTitle").textContent = "Nothing playing";
+      $("npBy").textContent = "The room is quiet.";
+      $("npDial").hidden = true;
+      $("npDial").classList.remove("scanning");
+      $("npCtx").hidden = true;
+      return;
+    }
+    $("lamp").classList.toggle("on", !!np.signal);
+    $("npLegend").textContent = "Now playing";
+    $("npTitle").textContent = np.title;
+
+    const by = $("npBy");
+    by.innerHTML = "";
+    const b = document.createElement("b");
+    b.textContent = np.artist;
+    by.append(b);
+    if (np.album) by.append(` · ${np.album}`);
+    if (np.genre) by.append(` · ${np.genre}`);
+
+    const ctx = $("npCtx");
+    if (np.plays) {
+      let s = np.plays === 1 ? "first play" : `play #${np.plays}`;
+      if (np.last_heard) s += ` · last heard ${String(np.last_heard).slice(0, 10)}`;
+      ctx.textContent = s;
+      ctx.hidden = false;
+    } else {
+      ctx.hidden = true;
+    }
+
+    const well = $("npWell");
+    const stamp = np.title + "\u0000" + np.artist;
+    if (np.cover_url && well.dataset.stamp !== stamp) {
+      well.dataset.stamp = stamp;
+      well.innerHTML = "";
+      const img = new Image();
+      img.alt = np.album || np.title;
+      // /cover/now streams from the local cache; the CDN is only ever hit once.
+      img.src = authed("/cover/now?k=" + encodeURIComponent(stamp));
+      img.addEventListener("error", () => { if (np.cover_url) img.src = np.cover_url; });
+      well.append(img);
+    } else if (!np.cover_url && well.dataset.stamp !== stamp) {
+      well.dataset.stamp = stamp;
+      well.innerHTML = '<span class="empty">No art</span>';
+    }
+
+    const dur = np.duration || 0;
+    const el = dur ? Math.min(npTick, dur) : npTick;
+    $("npElapsed").textContent = mmss(el);
+    $("npDuration").textContent = dur ? mmss(dur) : "\u2014";
+    $("npDial").hidden = false;
+    if (dur) {
+      const pct = Math.min(100, (el / dur) * 100);
+      $("npFill").style.width = pct + "%";
+      $("npNeedle").style.left = pct + "%";
+      $("npDial").classList.remove("scanning");
+    } else {
+      // No duration known: Shazam omitted it and enrichment hasn't filled it
+      // (elapsed is time since recognition, not true offset, on the Shazam
+      // path). Don't pin the dial at 0% looking broken -- free-run the readout
+      // and sweep the needle so it reads as "playing, length unknown".
+      $("npFill").style.width = "0%";
+      $("npDial").classList.add("scanning");
+    }
+  }
+
+  async function pollNow() {
+    try {
+      const r = await get("/api/now_playing");
+      np = await r.json();
+      npTick = np.elapsed || 0;
+    } catch { np = null; }
+    paintNow();
+  }
+  setInterval(pollNow, 5000);
+  setInterval(() => { if (np && np.playing) { npTick++; paintNow(); } }, 1000);
+
+  // ── state ──────────────────────────────────────────────────────────────
+  let view = "tracks", offset = 0, loading = false, done = false, merge = false;
+  const selected = new Map();   // id -> {title, artist}
+  const trivia = new Map();
+
+  const filters = () => {
+    const p = new URLSearchParams();
+    if ($("q").value.trim()) p.set("q", $("q").value.trim());
+    if ($("genre").value)    p.set("genre", $("genre").value);
+    return p;
+  };
+
+  function reset() {
+    offset = 0; done = false;
+    $("list").innerHTML = "";
+    $("msg").hidden = true;
+    load();
+  }
+
+  function paintSel() {
+    $("selCount").textContent = selected.size;
+    $("selbar").hidden = view === "stats" || view === "wantlist";
+    const none = selected.size === 0;
+    $("download").disabled = none;
+    $("createPl").disabled = none;
+  }
+
+  // ── rows ───────────────────────────────────────────────────────────────
+  function makeRow(r, mode) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.dataset.id = r.id;
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected.has(String(r.id));
+    cb.addEventListener("change", () => {
+      const k = String(r.id);
+      cb.checked ? selected.set(k, { title: r.title, artist: r.artist }) : selected.delete(k);
+      paintSel();
+    });
+    row.append(cb);
+
+    const art = document.createElement("img");
+    art.className = "art";
+    art.loading = "lazy";
+    art.alt = "";
+    if (r.cover_url) {
+      art.src = authed(`/cover/${r.id}`);
+      art.addEventListener("error", () => {
+        if (art.dataset.fellBack) return;      // don't loop if the CDN is gone too
+        art.dataset.fellBack = "1";
+        art.src = r.cover_url;
+      }, { once: false });
+    }
+    row.append(art);
+
+    const mid = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = r.title;
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    sub.textContent = r.artist;
+    if (r.album) {
+      sub.append(Object.assign(document.createElement("span"), { className: "dot", textContent: "·" }));
+      sub.append(r.album);
+    }
+    if (r.genre) {
+      sub.append(Object.assign(document.createElement("span"), { className: "dot", textContent: "·" }));
+      sub.append(r.genre);
+    }
+    const acts = document.createElement("div");
+    acts.className = "acts";
+    // Don't let a link/button click also toggle the trivia panel.
+    acts.addEventListener("click", (e) => e.stopPropagation());
+    const q = encodeURIComponent(`${r.artist} ${r.title}`);
+    [
+      ["Spotify", `https://open.spotify.com/search/${q}`],
+      ["Apple", `https://music.apple.com/search?term=${q}`],
+      ["TIDAL", `https://tidal.com/search?q=${q}`],
+    ].forEach(([label, href]) => {
+      const a = document.createElement("a");
+      a.className = "svc";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = label;
+      acts.append(a);
+    });
+    const fixBtn = document.createElement("button");
+    fixBtn.className = "svc fix";
+    fixBtn.textContent = "Fix";
+    fixBtn.title = "Relabel this and remember the correction";
+    fixBtn.addEventListener("click", () => fixRow(row, r));
+    acts.append(fixBtn);
+
+    mid.append(name, sub, acts);
+    mid.style.cursor = r.album ? "pointer" : "default";
+    if (r.album) mid.addEventListener("click", () => toggleTrivia(row, r));
+    row.append(mid);
+
+    const right = document.createElement("div");
+    right.className = "right";
+
+    const lib = document.createElement("span");
+    lib.className = "lib no";
+    lib.textContent = "···";
+    lib.title = "Checking your Plex library";
+    right.append(lib);
+
+    if (mode === "tracks") {
+      right.append(Object.assign(document.createElement("span"),
+        { className: "plays", textContent: `${r.plays}×` }));
+      right.append(Object.assign(document.createElement("span"),
+        { className: "when", textContent: (r.last_played || "").slice(5, 16) }));
+    } else {
+      right.append(Object.assign(document.createElement("span"),
+        { className: "when", textContent: (r.played_at || "").slice(11, 16) }));
+    }
+
+    const kill = document.createElement("button");
+    kill.className = "kill";
+    kill.textContent = "×";
+    kill.title = mode === "tracks" ? "Forget this track entirely" : "Remove this play";
+    kill.addEventListener("click", () => removeRow(row, r, mode));
+    right.append(kill);
+    row.append(right);
+
+    return row;
+  }
+
+  async function toggleTrivia(row, r) {
+    const open = row.nextElementSibling;
+    if (open && open.classList.contains("row-trivia")) { open.remove(); return; }
+
+    const holder = document.createElement("div");
+    holder.className = "row row-trivia";
+    const t = document.createElement("div");
+    t.className = "trivia";
+    t.textContent = "Looking it up…";
+    holder.append(document.createElement("span"), document.createElement("span"), t);
+    row.after(holder);
+
+    const key = r.artist + "\u0000" + r.album;
+    if (!trivia.has(key)) {
+      try {
+        const res = await get(`/album_trivia?album=${encodeURIComponent(r.album)}&artist=${encodeURIComponent(r.artist)}`);
+        const js = await res.json();
+        trivia.set(key, js.trivia || "");
+      } catch { trivia.set(key, ""); }
+    }
+    t.textContent = trivia.get(key) || `No notes on ${r.album}.`;
+  }
+
+  async function removeRow(row, r, mode) {
+    const what = mode === "tracks"
+      ? `Forget every play of "${r.title}" by ${r.artist}?`
+      : `Remove this play of "${r.title}"?`;
+    if (!confirm(what)) return;
+
+    const req = mode === "tracks"
+      ? fetch(authed("/api/forget"), { method: "POST", headers: hdrs({ "Content-Type": "application/json" }),
+                                       body: JSON.stringify({ title: r.title, artist: r.artist }) })
+      : fetch(authed(`/api/play/${r.id}`), { method: "DELETE", headers: hdrs() });
+    try {
+      const res = await req;
+      if (!res.ok) throw new Error();
+      selected.delete(String(r.id));
+      const next = row.nextElementSibling;
+      if (next && next.classList.contains("row-trivia")) next.remove();
+      row.remove();
+      paintSel();
+    } catch { flash("Couldn't remove that. Try again."); }
+  }
+
+  // ── plex badges ────────────────────────────────────────────────────────
+  async function checkLibrary(rows) {
+    const payload = rows.map((r) => ({ id: r.id, artist: r.artist, title: r.title }));
+    if (!payload.length) return;
+    try {
+      const res = await fetch(authed("/api/in_library"), {
+        method: "POST", headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ tracks: payload }),
+      });
+      const js = await res.json();
+      document.querySelectorAll(".row").forEach((row) => {
+        const badge = row.querySelector(".lib");
+        const hit = js.found ? js.found[row.dataset.id] : undefined;
+        if (!badge || hit === undefined) return;
+        if (!js.configured) { badge.remove(); return; }
+        badge.textContent = hit ? "In library" : "Not in Plex";
+        badge.classList.toggle("no", !hit);
+        badge.title = hit ? "Plex has this — it'll be in the playlist"
+                          : "Plex can't find this — it'll be skipped";
+      });
+    } catch { /* badges are a nicety, not load-bearing */ }
+  }
+
+  // ── loading ────────────────────────────────────────────────────────────
+  const flash = (m) => { const e = $("msg"); e.hidden = false; e.textContent = m; };
+
+  // ── correction ─────────────────────────────────────────────────────────
+  async function fixRow(row, r) {
+    const input = prompt("Correct label as  Artist - Title", `${r.artist} - ${r.title}`);
+    if (!input) return;
+    const sep = input.indexOf(" - ");
+    if (sep < 0) { flash("Use the form  Artist - Title"); return; }
+    const artist = input.slice(0, sep).trim();
+    const title = input.slice(sep + 3).trim();
+    if (!artist || !title) return;
+    try {
+      const res = await fetch(authed("/api/fix"), {
+        method: "POST",
+        headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ old_artist: r.artist, old_title: r.title, artist, title }),
+      });
+      const js = await res.json();
+      if (!res.ok) { flash(js.error || "Couldn't apply that fix."); return; }
+      r.artist = artist; r.title = title;
+      const nameEl = row.querySelector(".name");
+      if (nameEl) nameEl.textContent = title;
+      flash(`Fixed — relabeled ${js.relabeled} play${js.relabeled === 1 ? "" : "s"}. Future mis-IDs auto-correct.`);
+    } catch { flash("Couldn't apply that fix."); }
+  }
+
+  // ── want-list (heard, not in Plex) ──────────────────────────────────────
+  function svcLinks(r) {
+    const acts = document.createElement("div");
+    acts.className = "acts";
+    const q = encodeURIComponent(`${r.artist} ${r.title}`);
+    [
+      ["Spotify", `https://open.spotify.com/search/${q}`],
+      ["Apple", `https://music.apple.com/search?term=${q}`],
+      ["TIDAL", `https://tidal.com/search?q=${q}`],
+    ].forEach(([label, href]) => {
+      const a = document.createElement("a");
+      a.className = "svc"; a.href = href; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = label;
+      acts.append(a);
+    });
+    return acts;
+  }
+
+  function makeWantRow(r) {
+    const row = document.createElement("div");
+    row.className = "row want";
+    const art = document.createElement("img");
+    art.className = "art"; art.loading = "lazy"; art.alt = "";
+    if (r.cover_url) art.src = authed(`/cover/${r.id}`);
+    row.append(art);
+    const mid = document.createElement("div");
+    const name = document.createElement("div"); name.className = "name"; name.textContent = r.title;
+    const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = r.artist;
+    mid.append(name, sub, svcLinks(r));
+    row.append(mid);
+    const right = document.createElement("div");
+    right.className = "right";
+    right.append(Object.assign(document.createElement("span"),
+      { className: "plays", textContent: `${r.plays}×` }));
+    row.append(right);
+    return row;
+  }
+
+  async function loadWantlist() {
+    const list = $("list");
+    list.innerHTML = '<div class="msg">Checking what Plex is missing…</div>';
+    $("msg").hidden = true;
+    let js;
+    try { js = await (await get("/api/wantlist")).json(); }
+    catch { list.innerHTML = ""; flash("Couldn't load the want-list."); return; }
+    if (!js.configured) { list.innerHTML = ""; flash("Connect Plex to see what you're missing."); return; }
+    if (!js.tracks.length) { list.innerHTML = ""; flash("Nothing to want — Plex has everything you've heard."); return; }
+
+    list.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "wantbar";
+    bar.append(Object.assign(document.createElement("span"),
+      { textContent: `${js.tracks.length} heard but not in Plex` }));
+    const copy = document.createElement("button");
+    copy.className = "btn"; copy.textContent = "Copy list";
+    copy.addEventListener("click", () => {
+      const text = js.tracks.map((t) => `${t.artist} - ${t.title}`).join("\n");
+      navigator.clipboard.writeText(text).then(() => flash("Copied to clipboard."))
+        .catch(() => flash("Copy failed."));
+    });
+    bar.append(copy);
+    list.append(bar);
+
+    const frag = document.createDocumentFragment();
+    js.tracks.forEach((r) => frag.append(makeWantRow(r)));
+    list.append(frag);
+  }
+
+  async function load() {
+    if (loading || done || view === "stats" || view === "wantlist") return;
+    loading = true;
+    try {
+      const p = filters();
+      p.set("offset", offset);
+      if (view === "tracks") {
+        p.set("limit", 25);
+        p.set("sort", $("sort").value);
+        if (merge) p.set("merge", "1");
+      } else {
+        p.set("limit", 50);
+      }
+      const url = (view === "tracks" ? "/archive_data?" : "/api/history?") + p;
+      const res = await get(url);
+      if (!res.ok) { flash("Couldn't load tracks. Check the service log."); return; }
+      const rows = await res.json();
+
+      if (!rows.length && offset === 0) {
+        flash($("q").value || $("genre").value
+          ? "Nothing matches that. Try a shorter search."
+          : "No plays recorded yet. Put something on.");
+        done = true;
+        return;
+      }
+      if (!rows.length) { done = true; return; }
+
+      const list = $("list");
+      let lastDay = list.dataset.lastDay || "";
+      const frag = document.createDocumentFragment();
+
+      rows.forEach((r) => {
+        if (view === "history") {
+          const day = (r.played_at || "").slice(0, 10);
+          if (day && day !== lastDay) {
+            lastDay = day;
+            const d = document.createElement("div");
+            d.className = "daymark";
+            d.textContent = dayLabel(day);
+            frag.append(d);
+          }
+        }
+        frag.append(makeRow(r, view));
+      });
+      list.dataset.lastDay = lastDay;
+      list.append(frag);
+
+      offset += rows.length;
+      checkLibrary(rows);
+    } catch {
+      flash("Couldn't load tracks. Check the service log.");
+    } finally {
+      loading = false;
+    }
+  }
+
+  function dayLabel(iso) {
+    const today = new Date().toISOString().slice(0, 10);
+    const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    if (iso === today) return "Today";
+    if (iso === y) return "Yesterday";
+    return new Date(iso + "T12:00").toLocaleDateString(undefined,
+      { weekday: "long", month: "short", day: "numeric" });
+  }
+
+  // ── stats ──────────────────────────────────────────────────────────────
+  function bars(items, max) {
+    return items.map((i) => `
+      <div class="bar">
+        <div class="lab">${esc(i.label)}${i.sub ? ` <i>${esc(i.sub)}</i>` : ""}</div>
+        <div class="n">${i.plays}</div>
+        <div class="track"><i style="width:${(i.plays / max) * 100}%"></i></div>
+      </div>`).join("");
+  }
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  async function loadStats() {
+    $("list").innerHTML = '<div class="msg">Reading the log…</div>';
+    let s;
+    try { s = await (await get("/api/stats")).json(); }
+    catch { flash("Couldn't load stats."); return; }
+    if (s.error) { flash("Couldn't load stats."); return; }
+
+    const t = s.totals || {};
+    const panel = (title, items) => {
+      if (!items || !items.length) return "";
+      const max = Math.max(...items.map((i) => i.plays)) || 1;
+      return `<div class="card"><h3 class="legend">${title}</h3>${bars(items, max)}</div>`;
+    };
+
+    // Height by listening minutes -- what "most used" actually means. A single
+    // 18-minute ambient track and a 2-minute punk song aren't equal usage.
+    const hMax = Math.max(...s.by_hour.map((h) => h.minutes || 0), 1);
+    const clock = s.by_hour.map((h) =>
+      `<i style="height:${Math.max(2, ((h.minutes || 0) / hMax) * 100)}%" title="${h.hour}:00 — ${fmtDur(h.minutes)} · ${h.plays} plays"></i>`).join("");
+    const hourLabels = s.by_hour.map((h) => `<span>${h.hour % 6 === 0 ? h.hour : ""}</span>`).join("");
+
+    const calendar = buildCalendar(s.calendar || []);
+
+    // Current day streak: consecutive days up to today with at least one play.
+    // Today being empty (nothing on yet) is tolerated -- count back from there.
+    const calMap = new Map((s.calendar || []).map((d) => [d.day, d]));
+    let streak = 0;
+    {
+      const d = new Date(); d.setHours(12, 0, 0, 0);
+      for (let i = 0; i < 400; i++) {
+        const rec = calMap.get(dayKey(d));
+        if (rec && rec.plays > 0) streak++;
+        else if (i > 0) break;
+        d.setDate(d.getDate() - 1);
+      }
+    }
+    const rate = s.recognition && s.recognition.rate != null
+      ? Math.round(s.recognition.rate * 100) + "%" : "—";
+    const sessions = s.sessions && s.sessions.count != null
+      ? s.sessions.count.toLocaleString() : "—";
+    const newArtists = (s.new_artists || []);
+
+    $("list").innerHTML = `
+      <div class="grid">
+        <div class="card wide">
+          <div class="totals">
+            <div><span>${(t.plays || 0).toLocaleString()}</span><div class="legend">Plays</div></div>
+            <div><span>${(t.tracks || 0).toLocaleString()}</span><div class="legend">Tracks</div></div>
+            <div><span>${(t.artists || 0).toLocaleString()}</span><div class="legend">Artists</div></div>
+            <div><span>${(t.albums || 0).toLocaleString()}</span><div class="legend">Albums</div></div>
+            <div><span>${Math.round((t.minutes || 0) / 60).toLocaleString()}</span><div class="legend">Hours listened</div></div>
+            <div><span>${rate}</span><div class="legend">Match rate</div></div>
+            <div><span>${streak}</span><div class="legend">Day streak</div></div>
+            <div><span>${sessions}</span><div class="legend">Sessions</div></div>
+            <div style="flex:1"></div>
+            <div><span style="font-size:14px;color:var(--ink-dim)">${esc((t.first_play || "").slice(0, 10))}</span>
+                 <div class="legend">Listening since</div></div>
+          </div>
+        </div>
+
+        <div class="card wide">
+          <h3 class="legend">When you listen</h3>
+          <div class="clock">${clock}</div>
+          <div class="hours">${hourLabels}</div>
+        </div>
+
+        ${panel("Top artists", s.top_artists)}
+        ${panel("Top albums", s.top_albums)}
+        ${panel("Top tracks", s.top_tracks)}
+        ${panel("Genres", s.genres)}
+
+        ${newArtists.length ? `<div class="card"><h3 class="legend">New artists this week</h3>
+          <div class="nalist">${newArtists.map((a) => `<span class="na">${esc(a)}</span>`).join("")}</div></div>` : ""}
+
+        ${calendar}
+      </div>`;
+  }
+
+  // ── wiring ─────────────────────────────────────────────────────────────
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", "false"));
+      tab.setAttribute("aria-selected", "true");
+      view = tab.dataset.view;
+      $("sort").hidden = view !== "tracks";
+      $("mergeBtn").hidden = view !== "tracks";
+      $("list").dataset.lastDay = "";
+      paintSel();
+      if (view === "stats") { $("list").innerHTML = ""; $("msg").hidden = true; loadStats(); }
+      else if (view === "wantlist") { done = true; loadWantlist(); }
+      else reset();
+    });
+  });
+
+  let debounce;
+  $("q").addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => { if (view !== "stats") reset(); }, 280);
+  });
+  $("genre").addEventListener("change", () => { if (view !== "stats") reset(); });
+  $("sort").addEventListener("change", reset);
+  $("mergeBtn").addEventListener("click", () => {
+    merge = !merge;
+    $("mergeBtn").classList.toggle("primary", merge);
+    reset();
+  });
+
+  $("clearSel").addEventListener("click", () => {
+    selected.clear();
+    document.querySelectorAll('.row input[type=checkbox]').forEach((c) => (c.checked = false));
+    paintSel();
+  });
+
+  $("selectAll").addEventListener("click", async () => {
+    const res = await get("/api/matching_ids?" + filters());
+    const ids = await res.json();
+    ids.forEach((id) => selected.set(String(id), {}));
+    document.querySelectorAll(".row").forEach((row) => {
+      const cb = row.querySelector('input[type=checkbox]');
+      if (cb && selected.has(row.dataset.id)) cb.checked = true;
+    });
+    paintSel();
+  });
+
+  $("createPl").addEventListener("click", async () => {
+    const ids = [...selected.keys()];
+    if (!ids.length) return;
+    const name = prompt("Plex playlist name", "Heard on the stereo");
+    if (!name) return;
+    $("createPl").disabled = true;
+    try {
+      const res = await fetch(authed("/create_plex_playlist"), {
+        method: "POST",
+        headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids, name }),
+      });
+      const js = await res.json();
+      if (!res.ok) { flash(js.error || "Couldn't create the playlist."); return; }
+      flash(`${js.created ? "Created" : "Updated"} "${js.playlist}" — added ${js.added}`
+        + (js.skipped ? `, skipped ${js.skipped} not in Plex.` : "."));
+    } catch { flash("Couldn't create the playlist."); }
+    finally { $("createPl").disabled = false; }
+  });
+
+  $("download").addEventListener("click", async () => {
+    const ids = [...selected.keys()];
+    if (!ids.length) return;
+    $("download").disabled = true;
+    try {
+      const res = await fetch(authed("/download_playlist"), {
+        method: "POST", headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        flash(e.error || "Playlist download failed.");
+        return;
+      }
+      const skipped = Number(res.headers.get("X-Skipped-Count") || 0);
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href: url, download: "playlist.m3u" });
+      document.body.append(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      if (skipped) flash(`${skipped} track${skipped > 1 ? "s" : ""} weren't in Plex and were left out.`);
+    } finally {
+      $("download").disabled = false;
+    }
+  });
+
+  window.addEventListener("scroll", () => {
+    if (window.innerHeight + window.scrollY > document.body.offsetHeight - 240) load();
+  }, { passive: true });
+
+  // ── boot ───────────────────────────────────────────────────────────────
+  (async () => {
+    $("docsLink").href = authed("/docs");
+    pollNow();
+    try {
+      const gs = await (await get("/api/genres")).json();
+      gs.forEach((g) => $("genre").append(new Option(g, g)));
+    } catch { /* the genre filter is optional */ }
+    try {
+      const s = await (await get("/api/stats")).json();
+      if (s.totals) $("brandCount").textContent =
+        `${(s.totals.plays || 0).toLocaleString()} plays · ${(s.totals.tracks || 0).toLocaleString()} tracks`;
+    } catch { /* header count is decoration */ }
+    paintSel();
+    load();
+  })();
+})();
+</script>
+</body>
+</html>

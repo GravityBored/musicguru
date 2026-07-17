@@ -1,0 +1,10 @@
+# Core
+Flask>=3.0
+mysql-connector-python>=9.0
+requests>=2.31
+Pillow>=10.0
+pydub>=0.25
+shazamio>=0.4
+
+# Optional: MQTT publishing (Home Assistant, etc.)
+# paho-mqtt>=2.0

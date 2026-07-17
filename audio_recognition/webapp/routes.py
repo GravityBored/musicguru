@@ -1,0 +1,394 @@
+import logging
+import re
+
+import requests
+from flask import (
+    Blueprint, Response, abort, jsonify, redirect, render_template, request,
+    send_file, session, stream_with_context, url_for,
+)
+
+from .. import corrections, covers, state
+from . import auth
+from ..config import (
+    ARCHIVE_MAX_LIMIT, LASTFM_API_KEY, LASTFM_TIMEOUT, PLAYLIST_EMBED_TOKEN,
+    PLEX_BASE_URL, PLEX_TOKEN,
+)
+from ..plex import client as plex
+from ..storage import db as store
+
+log = logging.getLogger("audio_recognition.webapp")
+
+bp = Blueprint("routes", __name__)
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_READMORE_RE = re.compile(r"read more.*", re.IGNORECASE | re.DOTALL)
+
+
+def _int_arg(name, default, lo, hi):
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    try:
+        return max(lo, min(hi, int(raw)))
+    except ValueError:
+        return default
+
+
+def _str_arg(name, maxlen=120):
+    v = (request.args.get(name) or "").strip()
+    return v[:maxlen] or None
+
+
+def _common_filters():
+    return {
+        "q": _str_arg("q"),
+        "genre": _str_arg("genre"),
+        "date_from": _str_arg("from", 10),
+        "date_to": _str_arg("to", 10),
+    }
+
+
+# --- now playing ---------------------------------------------------------
+
+@bp.route("/api/now_playing")
+def now_playing():
+    return jsonify(state.snapshot())
+
+
+# --- tracks / history ----------------------------------------------------
+
+@bp.route("/archive_data")
+def archive_data():
+    return jsonify(store.get_archive(
+        offset=_int_arg("offset", 0, 0, 1_000_000),
+        limit=_int_arg("limit", 25, 1, ARCHIVE_MAX_LIMIT),
+        sort=_str_arg("sort") or "recent",
+        merge_variants=request.args.get("merge") == "1",
+        **_common_filters(),
+    ))
+
+
+@bp.route("/api/history")
+def history():
+    return jsonify(store.get_history(
+        offset=_int_arg("offset", 0, 0, 1_000_000),
+        limit=_int_arg("limit", 50, 1, ARCHIVE_MAX_LIMIT),
+        **_common_filters(),
+    ))
+
+
+@bp.route("/api/genres")
+def genres():
+    return jsonify(store.get_genres())
+
+
+@bp.route("/api/stats")
+def stats():
+    return jsonify(store.get_stats())
+
+
+@bp.route("/api/matching_ids")
+def matching_ids():
+    return jsonify(store.get_matching_ids(**_common_filters()))
+
+
+@bp.route("/api/in_library", methods=["POST"])
+def in_library():
+    """Which of these are actually in Plex? The playlist silently skips the rest."""
+    payload = request.get_json(silent=True) or {}
+    tracks = payload.get("tracks") or []
+    if not plex.configured():
+        return jsonify({"configured": False, "found": {}})
+    found = {}
+    for t in tracks[:60]:
+        tid = t.get("id")
+        if tid is None:
+            continue
+        found[str(tid)] = plex.find_track(t.get("artist", ""), t.get("title", "")) is not None
+    return jsonify({"configured": True, "found": found})
+
+
+# --- edits ---------------------------------------------------------------
+
+@bp.route("/api/play/<int:play_id>", methods=["DELETE"])
+def delete_play(play_id):
+    return jsonify({"deleted": store.delete_play(play_id)})
+
+
+@bp.route("/api/forget", methods=["POST"])
+def forget():
+    payload = request.get_json(silent=True) or {}
+    title, artist = payload.get("title"), payload.get("artist")
+    if not title or not artist:
+        return jsonify({"error": "title and artist required"}), 400
+    return jsonify({"deleted": store.forget_track(title, artist)})
+
+
+# --- playlist ------------------------------------------------------------
+
+@bp.route("/download_playlist", methods=["POST"])
+def download_playlist():
+    payload = request.get_json(silent=True) or {}
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "Select at least one track."}), 400
+
+    tracks = store.get_tracks_by_ids(ids)
+    if not tracks:
+        return jsonify({"error": "No matching tracks."}), 404
+
+    lines, missing = ["#EXTM3U"], []
+    for t in tracks:
+        match = plex.find_track(t["artist"], t["title"])
+        if not match:
+            missing.append(f"{t['artist']} - {t['title']}")
+            continue
+        duration = t.get("duration") or match.get("duration") or -1
+        lines.append(f"#EXTINF:{int(duration)},{t['artist']} - {t['title']}")
+        if PLAYLIST_EMBED_TOKEN:
+            lines.append(f"{PLEX_BASE_URL}{match['part_key']}?X-Plex-Token={PLEX_TOKEN}")
+        else:
+            lines.append(url_for("routes.stream", track_id=t["id"], _external=True))
+
+    if len(lines) == 1:
+        return jsonify({"error": "None of these are in your Plex library."}), 404
+    if missing:
+        log.info("Not in Plex, skipped: %s", "; ".join(missing))
+
+    return Response(
+        "\n".join(lines) + "\n",
+        mimetype="audio/x-mpegurl",
+        headers={
+            "Content-Disposition": 'attachment; filename="playlist.m3u"',
+            "X-Skipped-Count": str(len(missing)),
+        },
+    )
+
+
+@bp.route("/stream/<int:track_id>")
+def stream(track_id):
+    """Proxy the Plex part so the token never leaves the server."""
+    rows = store.get_tracks_by_ids([track_id])
+    if not rows:
+        abort(404)
+    match = plex.find_track(rows[0]["artist"], rows[0]["title"])
+    if not match:
+        abort(404)
+
+    try:
+        upstream = plex.open_stream(match["part_key"], request.headers.get("Range"))
+    except requests.RequestException as e:
+        log.warning("Plex stream failed: %s", e)
+        abort(502)
+    if upstream.status_code >= 400:
+        upstream.close()
+        abort(upstream.status_code)
+
+    keep = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
+    headers = {k: v for k, v in upstream.headers.items() if k in keep}
+
+    def generate():
+        try:
+            for chunk in upstream.iter_content(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(stream_with_context(generate()),
+                    status=upstream.status_code, headers=headers)
+
+
+# --- cover art -----------------------------------------------------------
+
+def _serve_cover(url):
+    """Serve from the local cache, fetching once on a miss. After the first
+    hit this never touches Shazam's CDN again -- which is the point, because
+    those URLs expire and the archive would otherwise go blank over time."""
+    if not url:
+        abort(404)
+    path = covers.ensure(url)
+    if not path:
+        abort(404)
+    resp = send_file(path, mimetype="image/jpeg", conditional=True)
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
+@bp.route("/cover/<int:play_id>.jpg")
+@bp.route("/cover/<int:play_id>")
+def cover(play_id):
+    return _serve_cover(store.get_cover_url(play_id))
+
+
+@bp.route("/cover/now")
+def cover_now():
+    return _serve_cover(state.snapshot().get("cover_url"))
+
+
+# --- trivia --------------------------------------------------------------
+
+@bp.route("/album_trivia")
+def album_trivia():
+    album = (request.args.get("album") or "").strip()
+    artist = (request.args.get("artist") or "").strip()
+    if not album or not artist or not LASTFM_API_KEY:
+        return jsonify({"trivia": ""})
+
+    try:
+        resp = requests.get(
+            "https://ws.audioscrobbler.com/2.0/",
+            params={"method": "album.getInfo", "artist": artist, "album": album,
+                    "api_key": LASTFM_API_KEY, "format": "json", "autocorrect": 1},
+            timeout=LASTFM_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        log.warning("Last.fm lookup failed: %s", e)
+        return jsonify({"trivia": ""})
+
+    summary = ((data.get("album") or {}).get("wiki") or {}).get("summary", "")
+    summary = _READMORE_RE.sub("", _TAG_RE.sub("", summary)).strip()
+    return jsonify({"trivia": summary})
+
+
+@bp.route("/healthz")
+def healthz():
+    age = state.signal_age()
+    rate = store.get_recognition_rate(7)
+    return jsonify({
+        "ok": True,
+        "plex": plex.configured(),
+        "signal_age_sec": int(age) if age is not None else None,
+        "recognition_rate": rate["rate"],
+    })
+
+
+# --- want-list (heard, but not in Plex) ----------------------------------
+
+@bp.route("/api/wantlist")
+def wantlist():
+    """Distinct recognized tracks that Plex does NOT have -- an acquisition list.
+    Checks the most-played tracks first; find_track is cached, so repeat loads
+    are cheap even though the first pass hits Plex once per track."""
+    if not plex.configured():
+        return jsonify({"configured": False, "tracks": []})
+    out = []
+    for r in store.get_distinct_tracks(cap=600):
+        if plex.find_track(r["artist"], r["title"]) is None:
+            out.append(r)
+            if len(out) >= 200:
+                break
+    return jsonify({"configured": True, "tracks": out})
+
+
+# --- correction ----------------------------------------------------------
+
+@bp.route("/api/fix", methods=["POST"])
+def fix():
+    """Relabel a mis-recognized track and remember the correction so the same
+    raw recognition is auto-fixed in the future."""
+    p = request.get_json(silent=True) or {}
+    old_a, old_t = p.get("old_artist"), p.get("old_title")
+    new_a = (p.get("artist") or "").strip()
+    new_t = (p.get("title") or "").strip()
+    if not (old_a and old_t and new_a and new_t):
+        return jsonify({"error": "old_title/old_artist and new title/artist required"}), 400
+    relabeled = corrections.add(old_a, old_t, new_a, new_t)
+    return jsonify({"relabeled": relabeled, "artist": new_a, "title": new_t})
+
+
+# --- create a real Plex playlist -----------------------------------------
+
+@bp.route("/create_plex_playlist", methods=["POST"])
+def create_plex_playlist():
+    p = request.get_json(silent=True) or {}
+    ids = p.get("ids") or []
+    name = (p.get("name") or "").strip() or "Heard on the stereo"
+    if not plex.configured():
+        return jsonify({"error": "Plex is not configured."}), 400
+
+    keys, missing = [], []
+    for t in store.get_tracks_by_ids(ids):
+        match = plex.find_track(t["artist"], t["title"])
+        if match and match.get("rating_key"):
+            keys.append(match["rating_key"])
+        else:
+            missing.append(f"{t['artist']} - {t['title']}")
+    if not keys:
+        return jsonify({"error": "None of these are in your Plex library."}), 404
+
+    try:
+        result = plex.create_or_append_playlist(name, keys)
+    except Exception as e:
+        log.warning("Plex playlist failed: %s", e)
+        return jsonify({"error": "Plex rejected the playlist."}), 502
+    return jsonify({"playlist": name, "added": len(keys), "skipped": len(missing), **result})
+
+
+# --- prometheus metrics --------------------------------------------------
+
+@bp.route("/metrics")
+def metrics():
+    m = store.get_metrics()
+    rate = store.get_recognition_rate(7)
+    age = state.signal_age()
+    snap = state.snapshot()
+    lines = [
+        "# HELP ar_plays_total Recognized plays logged",
+        "# TYPE ar_plays_total counter",
+        f"ar_plays_total {int(m.get('plays', 0))}",
+        "# HELP ar_tracks_total Distinct tracks",
+        "# TYPE ar_tracks_total gauge",
+        f"ar_tracks_total {int(m.get('tracks', 0))}",
+        "# HELP ar_recognition_rate 7-day segment match rate",
+        "# TYPE ar_recognition_rate gauge",
+        f"ar_recognition_rate {rate['rate'] if rate['rate'] is not None else 0}",
+        "# HELP ar_signal_age_seconds Seconds since audio was last heard (-1 = never)",
+        "# TYPE ar_signal_age_seconds gauge",
+        f"ar_signal_age_seconds {int(age) if age is not None else -1}",
+        "# HELP ar_now_playing 1 if a track is currently identified",
+        "# TYPE ar_now_playing gauge",
+        f"ar_now_playing {1 if snap.get('playing') else 0}",
+        "# HELP ar_up 1 if the web app is serving",
+        "# TYPE ar_up gauge",
+        "ar_up 1",
+    ]
+    return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def auth_login():
+    if not auth.login_enabled():
+        return redirect(url_for("routes.index_page"))
+    nxt = request.args.get("next") or request.form.get("next") or "/"
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"   # only local redirects
+    if session.get("auth"):
+        return redirect(nxt)
+    error = None
+    if request.method == "POST":
+        if auth.check_login(request.form.get("username", ""),
+                            request.form.get("password", "")):
+            session.permanent = True
+            session["auth"] = True
+            session["user"] = request.form.get("username", "")
+            return redirect(nxt)
+        error = "Incorrect username or password."
+    return render_template("login.html", error=error, next=nxt), (401 if error else 200)
+
+
+@bp.route("/logout")
+def auth_logout():
+    session.clear()
+    return redirect(url_for("routes.auth_login"))
+
+
+@bp.route("/")
+def index_page():
+    return render_template("index.html", login_enabled=auth.login_enabled())
+
+
+@bp.route("/docs")
+def docs_page():
+    return render_template("docs.html")
