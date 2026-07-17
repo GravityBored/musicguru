@@ -46,7 +46,7 @@
 <div class="doc">
   <a class="back" id="backLink" href="/">&larr; Back to the console</a>
   <h1>plexamp&thinsp;·&thinsp;stereo</h1>
-  <p class="sub">Continuous line-in music recognition, logging, and browsing. Full feature reference.</p>
+  <p class="sub">Continuous music recognition, logging, and browsing. Full feature reference.</p>
 
   <ul class="toc">
     <li><a href="#overview">1. Overview</a></li>
@@ -63,7 +63,7 @@
   </ul>
 
   <h2 id="overview">1. Overview</h2>
-  <p>The daemon listens to a line-in audio device, and every few seconds records a short
+  <p>The daemon listens to room audio through a USB microphone, and every few seconds records a short
   segment, identifies the music playing, and logs it to a MySQL database. It drives an
   optional small framebuffer display (album art via <code>feh</code>) and serves this web
   console for browsing history, statistics, and playlists. Identification uses Shazam,
