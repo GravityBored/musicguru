@@ -129,6 +129,11 @@ PLEX_BASE_URL = os.getenv("AR_PLEX_BASE_URL", "").rstrip("/")
 PLEX_TOKEN = os.getenv("AR_PLEX_TOKEN")  # required for playlists, no default
 PLEX_TIMEOUT = _env_float("AR_PLEX_TIMEOUT", 8.0)
 PLEX_MUSIC_TYPE = 10  # Plex metadata type id for "track"
+# Verify TLS. Turn OFF when pointing at https://<ip>:32400, since Plex's
+# *.plex.direct certificate won't validate against a bare IP.
+PLEX_VERIFY_SSL = _env_bool("AR_PLEX_VERIFY_SSL", True)
+# Explicit music library name. Leave unset to auto-pick the first music section.
+PLEX_MUSIC_SECTION = os.getenv("AR_PLEX_MUSIC_SECTION")
 # When False (the default), generated playlists point at this app's /stream/<id>
 # proxy instead of embedding X-Plex-Token in a file you hand to other people.
 PLAYLIST_EMBED_TOKEN = _env_bool("AR_PLAYLIST_EMBED_TOKEN", False)
