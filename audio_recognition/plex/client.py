@@ -15,12 +15,15 @@ fastest way to tell a connection problem from a matching problem:
 """
 import logging
 import re
+import threading
+import time
 import unicodedata
 
 import requests
 
 from ..config import (
-    PLEX_BASE_URL, PLEX_MUSIC_SECTION, PLEX_TIMEOUT, PLEX_TOKEN, PLEX_VERIFY_SSL,
+    PLEX_BASE_URL, PLEX_INDEX_TTL, PLEX_MUSIC_SECTION, PLEX_TIMEOUT, PLEX_TOKEN,
+    PLEX_VERIFY_SSL,
 )
 
 log = logging.getLogger("audio_recognition.plex")
@@ -29,10 +32,22 @@ _cache: dict[tuple[str, str], dict | None] = {}
 _server = None
 _section = None
 _connect_tried = False
+_index: dict[str, set] | None = None      # norm(title) -> {norm(artist), ...}
+_index_at = 0.0
+_index_lock = threading.Lock()
 
 
 def configured() -> bool:
     return bool(PLEX_BASE_URL and PLEX_TOKEN)
+
+
+def _base_url() -> str:
+    """Tolerate a scheme-less base URL like '192.168.1.205:32400' by assuming
+    http:// (requests needs a scheme or it errors with 'No connection adapters')."""
+    u = (PLEX_BASE_URL or "").strip()
+    if u and not re.match(r"^https?://", u, re.I):
+        u = "http://" + u
+    return u
 
 
 def _norm(s: str) -> str:
@@ -70,7 +85,7 @@ def connect():
         return None, None
     try:
         from plexapi.server import PlexServer
-        _server = PlexServer(PLEX_BASE_URL, PLEX_TOKEN, session=_session(),
+        _server = PlexServer(_base_url(), PLEX_TOKEN, session=_session(),
                              timeout=int(PLEX_TIMEOUT))
     except Exception as e:
         log.warning("Plex connect failed (%s): %s", PLEX_BASE_URL, e)
@@ -180,9 +195,52 @@ def find_track(artist: str, title: str) -> dict | None:
     return m if m and m.get("part_key") else None
 
 
+def _build_index(section) -> dict:
+    """One bulk fetch of the whole music library -> {norm(title): {norm(artist)}}."""
+    idx: dict[str, set] = {}
+    for tr in section.searchTracks():   # all tracks in the section, one query
+        t = _norm(getattr(tr, "title", ""))
+        if not t:
+            continue
+        idx.setdefault(t, set()).add(_norm(getattr(tr, "grandparentTitle", "")))
+    return idx
+
+
+def library_index() -> dict | None:
+    """The title->artists index, (re)built at most every PLEX_INDEX_TTL seconds.
+    Returns None if Plex can't be reached (callers then fall back to live search)."""
+    global _index, _index_at
+    if not configured():
+        return None
+    with _index_lock:
+        if _index is not None and (time.time() - _index_at) < PLEX_INDEX_TTL:
+            return _index
+        _srv, section = connect()
+        if section is None:
+            return None
+        try:
+            _index = _build_index(section)
+            _index_at = time.time()
+            log.info("Plex library indexed: %d distinct titles.", len(_index))
+        except Exception as e:
+            log.warning("Plex index build failed: %s", e)
+            return None
+    return _index
+
+
 def in_library(artist: str, title: str) -> bool:
-    """Whether the library has this track at all, streamable or not."""
-    return _match(artist, title) is not None
+    """Whether the library has this track at all. Answered from the bulk index
+    (fast, for the want-list's hundreds of checks); falls back to a live search
+    only if the index couldn't be built."""
+    idx = library_index()
+    if idx is None:
+        return _match(artist, title) is not None
+    want_title, want_artist = _norm(title), _norm(artist)
+    arts = idx.get(want_title)
+    if not arts:
+        return False
+    return (not want_artist) or any(
+        want_artist == a or want_artist in a or a in want_artist for a in arts)
 
 
 def open_stream(part_key: str, range_header: str | None = None) -> requests.Response:
@@ -193,7 +251,7 @@ def open_stream(part_key: str, range_header: str | None = None) -> requests.Resp
         headers["Range"] = range_header
     sep = "&" if "?" in part_key else "?"
     return _session().get(
-        f"{PLEX_BASE_URL}{part_key}{sep}X-Plex-Token={PLEX_TOKEN}",
+        f"{_base_url()}{part_key}{sep}X-Plex-Token={PLEX_TOKEN}",
         headers=headers, stream=True, timeout=PLEX_TIMEOUT,
     )
 
@@ -249,6 +307,8 @@ if __name__ == "__main__":
         allsecs = f"<error: {e}>"
     print(f"connected. sections: {allsecs}")
     print(f"music section in use: {sec.title if sec else None}")
+    idx = library_index()
+    print(f"library index: {len(idx) if idx is not None else 'unavailable'} distinct titles")
     if len(sys.argv) >= 3:
         artist, title = sys.argv[1], sys.argv[2]
         print(f"\nsearching for: {artist!r} - {title!r}")
