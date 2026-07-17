@@ -386,7 +386,9 @@ def auth_logout():
 
 @bp.route("/")
 def index_page():
-    return render_template("index.html", login_enabled=auth.login_enabled())
+    from .. import __version__
+    return render_template("index.html", login_enabled=auth.login_enabled(),
+                           version=__version__)
 
 
 @bp.route("/docs")

@@ -247,6 +247,12 @@ select, .btn {
 }
 .docslink:hover { color: var(--lamp); border-color: var(--lamp); }
 
+/* Version tag, upper-right of the faceplate */
+.ver {
+  margin-left: 12px; font-family: var(--meter); font-size: 10px;
+  letter-spacing: .08em; color: var(--ink-faint);
+}
+
 /* Per-row actions: streaming search links + Fix */
 .acts { display: flex; gap: 8px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
 .acts .svc {
