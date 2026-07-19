@@ -370,6 +370,21 @@ def create_spotify_playlist():
 
 # --- tidal ---------------------------------------------------------------
 
+@bp.route("/tidal/login", methods=["POST"])
+def tidal_login():
+    if not tidal.configured():
+        return jsonify({"error": "Tidal is not enabled (see Config)."}), 400
+    info = tidal.begin_login()
+    if not info:
+        return jsonify({"error": "Could not start Tidal login."}), 502
+    return jsonify(info)
+
+
+@bp.route("/tidal/login/status")
+def tidal_login_status():
+    return jsonify(tidal.login_status())
+
+
 @bp.route("/create_tidal_playlist", methods=["POST"])
 def create_tidal_playlist():
     p = request.get_json(silent=True) or {}

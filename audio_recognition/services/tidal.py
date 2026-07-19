@@ -23,6 +23,7 @@ from ..config import TIDAL_ENABLED, TIDAL_TOKEN_CACHE
 log = logging.getLogger("audio_recognition.tidal")
 
 _session = None
+_pending = None   # in-progress web device login: {"session","future","link"}
 
 
 def configured() -> bool:
@@ -57,7 +58,9 @@ def _save(session) -> None:
 
 
 def _load_session():
-    """Return a logged-in tidalapi Session from the cached token, or None."""
+    """Return a logged-in tidalapi Session from the cached token, refreshing the
+    access token with the stored refresh token when it has expired. Only returns
+    None if there's no usable token at all."""
     global _session
     if _session is not None:
         return _session
@@ -70,17 +73,70 @@ def _load_session():
         exp = data.get("expiry_time")
         exp = datetime.datetime.fromisoformat(exp) if exp else None
         s = tidalapi.Session()
-        ok = s.load_oauth_session(
+        s.load_oauth_session(
             data["token_type"], data["access_token"], data.get("refresh_token"),
             exp, data.get("is_pkce", False),
         )
-        if ok and s.check_login():
-            _session = s
-            _save(s)   # tokens may have refreshed on load
-            return s
+        if not s.check_login():
+            # Access token expired -> refresh with the long-lived refresh token
+            # so the user never has to re-authorize by hand.
+            rt = data.get("refresh_token")
+            if not (rt and s.token_refresh(rt) and s.check_login()):
+                log.warning("Tidal token refresh failed; re-authorization needed.")
+                return None
+        _session = s
+        _save(s)   # persist the (possibly refreshed) access token + expiry
+        return s
     except Exception as e:
         log.warning("Tidal session load failed: %s", e)
     return None
+
+
+def _normalize_url(u: str) -> str:
+    u = (u or "").strip()
+    return u if u.startswith("http") else ("https://" + u if u else "")
+
+
+def begin_login() -> dict | None:
+    """Start a device-code login for the web UI. Returns the link + code to show
+    the user; a background thread polls Tidal until they approve."""
+    if not configured():
+        return None
+    global _pending
+    try:
+        import tidalapi
+        s = tidalapi.Session()
+        link, future = s.login_oauth()
+        _pending = {"session": s, "future": future, "link": link}
+        return {"url": _normalize_url(link.verification_uri_complete),
+                "code": link.user_code, "expires_in": int(link.expires_in)}
+    except Exception as e:
+        log.warning("Tidal begin_login failed: %s", e)
+        return None
+
+
+def login_status() -> dict:
+    """Poll target for the web login: reports pending / connected, saving the
+    token once the user approves in their browser."""
+    global _pending, _session
+    if not _pending:
+        return {"pending": False, "connected": connected()}
+    s, future, link = _pending["session"], _pending["future"], _pending["link"]
+    if future.done():
+        try:
+            future.result()
+        except Exception as e:
+            log.debug("Tidal login future: %s", e)
+        if s.check_login():
+            _session = s
+            _save(s)
+            _pending = None
+            return {"pending": False, "connected": True}
+        _pending = None
+        return {"pending": False, "connected": False,
+                "error": "Login wasn't approved before the code expired."}
+    return {"pending": True, "connected": False,
+            "url": _normalize_url(link.verification_uri_complete), "code": link.user_code}
 
 
 def connected() -> bool:

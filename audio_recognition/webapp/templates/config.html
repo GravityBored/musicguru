@@ -38,6 +38,8 @@
     .sect { font-family: var(--legend); letter-spacing: .06em; text-transform: uppercase; font-size: 11px; color: var(--lamp); margin: 18px 0 6px; }
     button.save { margin-top: 18px; padding: 9px 18px; cursor: pointer; background: var(--lamp); color: #1a1305; border: 0; border-radius: 2px; font-family: var(--legend); letter-spacing: .1em; text-transform: uppercase; font-weight: 700; font-size: 12px; }
     button.save:hover { filter: brightness(1.07); }
+    .tdbox { margin: 6px 0 4px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 2px; background: var(--panel); font-size: 13px; color: #cfd3d9; }
+    .tdbox a { color: var(--lamp); word-break: break-all; }
   </style>
 </head>
 <body>
@@ -103,11 +105,14 @@
     {% if not status.tidal.configured %}
       <span class="badge off">disabled</span><span class="grow"></span>
     {% elif status.tidal.connected %}
-      <span class="badge ok">connected</span><span class="grow"></span>
+      <span class="badge ok" id="tdBadge">connected</span><span class="grow"></span>
+      <button class="btn" id="tdConnect">Reconnect</button>
     {% else %}
-      <span class="badge warn">needs authorization</span><span class="grow"></span>
+      <span class="badge warn" id="tdBadge">needs authorization</span><span class="grow"></span>
+      <button class="btn solid" id="tdConnect">Connect Tidal</button>
     {% endif %}
   </div>
+  {% if status.tidal.configured %}<div id="tdBox" class="tdbox" hidden></div>{% endif %}
 
   <div class="row">
     <span class="name">Last.fm</span>
@@ -126,9 +131,7 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
 
   {% if status.tidal.configured and not status.tidal.connected %}
   <h2>Authorize Tidal</h2>
-  <p>Tidal uses a one-time device login. On the host, run:</p>
-  <pre>python -m audio_recognition.services.tidal login</pre>
-  <p>It prints a <code>link.tidal.com</code> URL — open it, approve, and the session is cached. Reload this page and it'll show <strong>connected</strong>.</p>
+  <p>Click <strong>Connect Tidal</strong> above and approve the link in your browser — no re-auth after that; the session refreshes itself. (Headless alternative: run <code>python -m audio_recognition.services.tidal login</code> on the host.)</p>
   {% elif not status.tidal.configured %}
   <h2>Enable Tidal</h2>
   <p>Set <code>AR_TIDAL_ENABLED=1</code>, restart, then authorize once with
@@ -172,6 +175,45 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
       if (s === "connected") { f.className = "flash ok"; f.textContent = "Spotify connected."; }
       else if (s === "denied") { f.className = "flash bad"; f.textContent = "Spotify authorization was declined."; }
       else if (s === "failed") { f.className = "flash bad"; f.textContent = "Spotify authorization failed — check your app credentials and redirect URI."; }
+    }
+
+    // Tidal in-console device login
+    var tdBtn = document.getElementById("tdConnect");
+    var polls = 0;
+    function tdPoll() {
+      fetch(authed("/tidal/login/status")).then(function (r) { return r.json(); }).then(function (j) {
+        var box = document.getElementById("tdBox");
+        var stat = document.getElementById("tdStat");
+        if (j.connected) {
+          box.innerHTML = "Tidal connected — you're set. It refreshes itself from now on.";
+          var b = document.getElementById("tdBadge"); if (b) { b.textContent = "connected"; b.className = "badge ok"; }
+          if (tdBtn) tdBtn.disabled = false;
+          return;
+        }
+        if (j.pending === false) {
+          if (stat) stat.textContent = j.error || "Login failed.";
+          if (tdBtn) tdBtn.disabled = false;
+          return;
+        }
+        if (++polls > 120) { if (stat) stat.textContent = "Timed out waiting for approval."; if (tdBtn) tdBtn.disabled = false; return; }
+        setTimeout(tdPoll, 3000);
+      }).catch(function () { setTimeout(tdPoll, 4000); });
+    }
+    if (tdBtn) {
+      tdBtn.addEventListener("click", function () {
+        tdBtn.disabled = true; polls = 0;
+        var box = document.getElementById("tdBox");
+        box.hidden = false; box.innerHTML = "Starting Tidal login…";
+        fetch(authed("/tidal/login"), { method: "POST" }).then(function (r) {
+          return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+        }).then(function (res) {
+          if (!res.ok) { box.innerHTML = res.j.error || "Couldn't start login."; tdBtn.disabled = false; return; }
+          box.innerHTML = 'Go to <a href="' + res.j.url + '" target="_blank" rel="noopener">' + res.j.url +
+            '</a> and approve. Code: <strong>' + res.j.code + '</strong><br>' +
+            '<span id="tdStat">Waiting for approval…</span>';
+          tdPoll();
+        }).catch(function () { box.innerHTML = "Couldn't start Tidal login."; tdBtn.disabled = false; });
+      });
     }
   })();
 </script>
