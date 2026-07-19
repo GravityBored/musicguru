@@ -68,6 +68,7 @@
       <button class="btn" id="clearSel">Clear</button>
       <button class="btn" id="createPl">Add to Plex playlist</button>
       <button class="btn" id="createSp">Create Spotify playlist</button>
+      <button class="btn" id="createTd">Create Tidal playlist</button>
       <button class="btn primary" id="download">Download playlist</button>
     </div>
   </div>
@@ -754,6 +755,26 @@
         + (js.url ? " Open it from your Spotify library." : ""));
     } catch { flash("Couldn't create the Spotify playlist."); }
     finally { $("createSp").disabled = false; }
+  });
+
+  $("createTd").addEventListener("click", async () => {
+    const ids = [...selected.keys()];
+    if (!ids.length) return;
+    const name = prompt("Tidal playlist name", "Heard on the stereo");
+    if (!name) return;
+    $("createTd").disabled = true;
+    try {
+      const res = await fetch(authed("/create_tidal_playlist"), {
+        method: "POST",
+        headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids, name }),
+      });
+      const js = await res.json();
+      if (!res.ok) { flash(js.error || "Couldn't create the Tidal playlist."); return; }
+      flash(`Created "${js.playlist}" on Tidal — added ${js.added}`
+        + (js.skipped ? `, ${js.skipped} not found.` : "."));
+    } catch { flash("Couldn't create the Tidal playlist."); }
+    finally { $("createTd").disabled = false; }
   });
 
   $("download").addEventListener("click", async () => {

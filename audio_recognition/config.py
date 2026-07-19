@@ -154,6 +154,17 @@ SPOTIFY_TOKEN_CACHE = os.getenv(
     os.path.expanduser("~/.config/audio_recognition/spotify.cache"),
 )
 SPOTIFY_PLAYLIST_PUBLIC = _env_bool("AR_SPOTIFY_PLAYLIST_PUBLIC", False)
+
+# --- Tidal (playlist export) ---------------------------------------------
+# No developer app needed -- Tidal uses a one-time device login. Enable it, then
+# authorize once from the Pi:  python -m audio_recognition.services.tidal login
+# (it prints a link.tidal.com URL to approve). The session is cached and
+# refreshed automatically after that.
+TIDAL_ENABLED = _env_bool("AR_TIDAL_ENABLED", False)
+TIDAL_TOKEN_CACHE = os.getenv(
+    "AR_TIDAL_TOKEN_CACHE",
+    os.path.expanduser("~/.config/audio_recognition/tidal.json"),
+)
 # When False (the default), generated playlists point at this app's /stream/<id>
 # proxy instead of embedding X-Plex-Token in a file you hand to other people.
 PLAYLIST_EMBED_TOKEN = _env_bool("AR_PLAYLIST_EMBED_TOKEN", False)

@@ -63,6 +63,17 @@
   </div>
 
   <div class="row">
+    <span class="name">Tidal</span>
+    {% if not status.tidal.configured %}
+      <span class="badge off">disabled</span><span class="grow"></span>
+    {% elif status.tidal.connected %}
+      <span class="badge ok">connected</span><span class="grow"></span>
+    {% else %}
+      <span class="badge warn">needs authorization</span><span class="grow"></span>
+    {% endif %}
+  </div>
+
+  <div class="row">
     <span class="name">Last.fm</span>
     {% if status.lastfm.configured %}<span class="badge ok">configured</span>{% else %}<span class="badge off">not set</span>{% endif %}
     <span class="grow"></span>
@@ -77,12 +88,23 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
   <p>The redirect URI must match the one in the Spotify app <em>exactly</em>. Restart, then reload this page and click <strong>Connect Spotify</strong>.</p>
   {% endif %}
 
+  {% if status.tidal.configured and not status.tidal.connected %}
+  <h2>Authorize Tidal</h2>
+  <p>Tidal uses a one-time device login. On the host, run:</p>
+  <pre>python -m audio_recognition.services.tidal login</pre>
+  <p>It prints a <code>link.tidal.com</code> URL — open it, approve, and the session is cached. Reload this page and it'll show <strong>connected</strong>.</p>
+  {% elif not status.tidal.configured %}
+  <h2>Enable Tidal</h2>
+  <p>Set <code>AR_TIDAL_ENABLED=1</code>, restart, then authorize once with
+  <code>python -m audio_recognition.services.tidal login</code> (no developer app needed).</p>
+  {% endif %}
+
   <h2>Playlist destinations</h2>
   <p>Select tracks in the console, then export them:</p>
   <ul>
     <li><strong>Plex</strong> — native playlist, or an M3U download of the in-library matches.</li>
     <li><strong>Spotify</strong> — native playlist, once connected above. Tracks are matched by title/artist search.</li>
-    <li><strong>Tidal</strong> — supported via the unofficial API; not enabled in this build yet.</li>
+    <li><strong>Tidal</strong> — native playlist, once authorized (device login). Matched by title/artist search.</li>
     <li><strong>Apple Music</strong> — requires a paid Apple Developer account and browser-side MusicKit authorization; use the per-track Apple links or a transfer service (Soundiiz/TuneMyMusic) in the meantime.</li>
   </ul>
 

@@ -10,6 +10,7 @@ from flask import (
 from .. import corrections, covers, state
 from . import auth
 from ..services import spotify
+from ..services import tidal
 from ..config import (
     ARCHIVE_MAX_LIMIT, LASTFM_API_KEY, LASTFM_TIMEOUT, PLAYLIST_EMBED_TOKEN,
     PLEX_BASE_URL, PLEX_TOKEN,
@@ -363,6 +364,31 @@ def create_spotify_playlist():
     return jsonify({"playlist": name, **result})
 
 
+# --- tidal ---------------------------------------------------------------
+
+@bp.route("/create_tidal_playlist", methods=["POST"])
+def create_tidal_playlist():
+    p = request.get_json(silent=True) or {}
+    ids = p.get("ids") or []
+    name = (p.get("name") or "").strip() or "Heard on the stereo"
+    if not tidal.configured():
+        return jsonify({"error": "Tidal is not enabled (see Config)."}), 400
+    if not tidal.connected():
+        return jsonify({"error": "Authorize Tidal first: run "
+                        "`python -m audio_recognition.services.tidal login` on the host."}), 400
+    if not ids:
+        return jsonify({"error": "Select at least one track."}), 400
+
+    tracks = [{"artist": t["artist"], "title": t["title"]}
+              for t in store.get_tracks_by_ids(ids)]
+    try:
+        result = tidal.create_playlist(name, tracks)
+    except Exception as e:
+        log.warning("Tidal playlist failed: %s", e)
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"playlist": name, **result})
+
+
 # --- config / status page ------------------------------------------------
 
 @bp.route("/config")
@@ -371,6 +397,8 @@ def config_page():
         "plex": {"configured": plex.configured()},
         "spotify": {"configured": spotify.configured(),
                     "connected": spotify.connected() if spotify.configured() else False},
+        "tidal": {"configured": tidal.configured(),
+                  "connected": tidal.connected() if tidal.configured() else False},
         "lastfm": {"configured": bool(LASTFM_API_KEY)},
     }
     return render_template("config.html", status=status,
