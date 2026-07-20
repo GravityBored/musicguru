@@ -27,7 +27,14 @@ _pending = None   # in-progress web device login: {"session","future","link"}
 
 
 def configured() -> bool:
-    return bool(TIDAL_ENABLED)
+    # Tidal needs no developer app or API key -- it's usable whenever the
+    # library is installed. "Configured" just means available; the real gate is
+    # whether you've connected (authorized) it.
+    try:
+        import tidalapi  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 from ..textmatch import norm as _norm, query_title as _clean, titles_match
@@ -240,7 +247,7 @@ if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)
     if not configured():
-        print("Tidal is disabled. Set AR_TIDAL_ENABLED=1 first.")
+        print("Tidal is unavailable -- install it with: pip install tidalapi")
         sys.exit(1)
     if len(sys.argv) >= 2 and sys.argv[1] == "login":
         print("Opening Tidal device login -- approve the printed URL in a browser...")

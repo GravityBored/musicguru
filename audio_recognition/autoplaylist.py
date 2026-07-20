@@ -17,11 +17,11 @@ log = logging.getLogger("audio_recognition.autoplaylist")
 
 
 def targets() -> list[str]:
-    """Enabled + configured services, for status/UX."""
+    """Enabled + usable (connected) services, for status/UX."""
     out = []
-    if config.AUTO_PLAYLIST_SPOTIFY and spotify.configured():
+    if config.AUTO_PLAYLIST_SPOTIFY and spotify.configured() and spotify.connected():
         out.append("spotify")
-    if config.AUTO_PLAYLIST_TIDAL and tidal.configured():
+    if config.AUTO_PLAYLIST_TIDAL and tidal.configured() and tidal.connected():
         out.append("tidal")
     if config.AUTO_PLAYLIST_PLEX and plex.configured():
         out.append("plex")

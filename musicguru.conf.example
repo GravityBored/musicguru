@@ -87,7 +87,6 @@ AR_SPOTIFY_PLAYLIST_PUBLIC=0
 # --- Tidal playlist export -----------------------------------------------
 # No developer app; one-time device login. Enable, then authorize on the host:
 #   python -m audio_recognition.services.tidal login
-AR_TIDAL_ENABLED=0
 
 # --- Login & config editor -----------------------------------------------
 # Login is MANDATORY: on first run the console sends you to a setup page to

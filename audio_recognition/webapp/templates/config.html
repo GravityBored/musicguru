@@ -111,12 +111,13 @@
   <div class="row">
     <span class="name">Tidal</span>
     {% if not status.tidal.configured %}
-      <span class="badge off">disabled</span><span class="grow"></span>
+      <span class="badge off">unavailable</span><span class="grow"></span>
+      <span class="opt">pip install tidalapi</span>
     {% elif status.tidal.connected %}
       <span class="badge ok" id="tdBadge">connected</span><span class="grow"></span>
       <button class="btn" id="tdConnect">Reconnect</button>
     {% else %}
-      <span class="badge warn" id="tdBadge">needs authorization</span><span class="grow"></span>
+      <span class="badge warn" id="tdBadge">not connected</span><span class="grow"></span>
       <button class="btn solid" id="tdConnect">Connect Tidal</button>
     {% endif %}
   </div>
@@ -147,10 +148,6 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
   {% if status.tidal.configured and not status.tidal.connected %}
   <h2>Authorize Tidal</h2>
   <p>Click <strong>Connect Tidal</strong> above and approve the link in your browser — no re-auth after that; the session refreshes itself. (Headless alternative: run <code>python -m audio_recognition.services.tidal login</code> on the host.)</p>
-  {% elif not status.tidal.configured %}
-  <h2>Enable Tidal</h2>
-  <p>Set <code>AR_TIDAL_ENABLED=1</code>, restart, then authorize once with
-  <code>python -m audio_recognition.services.tidal login</code> (no developer app needed).</p>
   {% endif %}
 
   <h2>Playlist destinations</h2>
