@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>plexamp-stereo — first-run setup</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .login { max-width: 360px; margin: 10vh auto 0; }
+    .login .brand { justify-content: center; margin-bottom: 22px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: var(--r); padding: 24px 22px;
+    }
+    .card h1 { font-family: var(--legend); letter-spacing: .04em; font-size: 18px; margin: 0 0 4px; }
+    .card .sub { color: var(--ink-dim); font-size: 13px; margin: 0 0 18px; }
+    .card .legend { display: block; margin-bottom: 4px; }
+    .field { margin-bottom: 14px; }
+    .field input {
+      width: 100%; padding: 9px 11px; background: var(--deep);
+      border: 1px solid var(--hairline); border-radius: 2px; color: var(--ink);
+      font-family: var(--body); font-size: 15px;
+    }
+    .field input:focus { outline: none; border-color: var(--lamp); }
+    button.signin {
+      width: 100%; padding: 10px; margin-top: 4px; cursor: pointer;
+      background: var(--lamp); color: #1a1305; border: 0; border-radius: 2px;
+      font-family: var(--legend); letter-spacing: .12em; text-transform: uppercase;
+      font-weight: 700; font-size: 13px;
+    }
+    button.signin:hover { filter: brightness(1.06); }
+    .err {
+      color: var(--alert); font-size: 13px; margin: 0 0 14px;
+      border-left: 2px solid var(--alert); padding-left: 10px;
+    }
+  </style>
+</head>
+<body>
+<div class="login">
+  <div class="brand">
+    <span class="lamp" style="background:var(--lamp)"></span>
+    <span class="name">plexamp&thinsp;·&thinsp;stereo</span>
+  </div>
+  <div class="card">
+    <h1>Create your login</h1>
+    <p class="sub">This console requires a login. Set a username and password to finish setup — you'll use these every time.</p>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    <form method="post" action="/setup">
+      <div class="field">
+        <label class="legend">Username</label>
+        <input type="text" name="username" autocomplete="username" autofocus />
+      </div>
+      <div class="field">
+        <label class="legend">Password</label>
+        <input type="password" name="password" autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label class="legend">Confirm password</label>
+        <input type="password" name="confirm" autocomplete="new-password" />
+      </div>
+      <button class="signin" type="submit">Create login &amp; continue</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

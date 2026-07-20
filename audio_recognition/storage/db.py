@@ -679,11 +679,15 @@ def get_stats() -> dict:
                 "SELECT COUNT(*) plays, COUNT(DISTINCT title, artist) tracks, "
                 "COUNT(DISTINCT artist) artists, COUNT(DISTINCT album) albums, "
                 f"{mins} AS minutes, "
+                f"COUNT(DISTINCT DATE({shifted})) AS active_days, "
                 "MIN(recognized_at) first_play, MAX(recognized_at) last_play "
-                "FROM recognized_songs", (avg_dur,)
+                "FROM recognized_songs", (avg_dur, off)
             )
             t = cur.fetchone() or {}
             t["minutes"] = int(t.get("minutes") or 0)
+            active = int(t.get("active_days") or 0)
+            t["active_days"] = active
+            t["per_day"] = round(t.get("plays", 0) / active) if active else 0
             t["first_play"] = utc_to_local_str(t.get("first_play"))
             t["last_play"] = utc_to_local_str(t.get("last_play"))
             out["totals"] = t

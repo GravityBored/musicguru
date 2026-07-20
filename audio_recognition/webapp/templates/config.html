@@ -53,7 +53,7 @@
 
   {% if editable %}
   <h2>Edit configuration</h2>
-  <p class="sub">Writes to <code>{{ env_file }}</code>. Secrets are write-only — leave a secret blank to keep its current value. <strong>Changes take effect after an app restart.</strong></p>
+  <p class="sub">Writes to <code>{{ env_file }}</code> — this app's own config file. Secrets are write-only (blank keeps the current value). <strong>Most changes take effect after a restart; the login username/password apply immediately.</strong></p>
   {% if not auth_on %}
   <div class="flash bad">No login is configured — anyone who can reach this console can read and change these settings. Set <code>AR_WEB_PASSWORD_HASH</code> and restart.</div>
   {% endif %}

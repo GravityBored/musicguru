@@ -1,3 +1,8 @@
+# musicguru.conf -- this application's own settings file.
+# Copy to 'musicguru.conf' (same directory as the app). Loaded at startup
+# and editable from the /config page. Only AR_DB_PASSWORD is strictly needed;
+# the login is created on first run.
+
 # audio_recognition — configuration for the newly added features.
 # Everything here is OPTIONAL. Unset = the feature is off and the app behaves
 # exactly as before (plus the DB-only features, which need no config). See
@@ -84,12 +89,11 @@ AR_SPOTIFY_PLAYLIST_PUBLIC=0
 #   python -m audio_recognition.services.tidal login
 AR_TIDAL_ENABLED=0
 
-# --- Config editor (optional) --------------------------------------------
-# This .env is auto-discovered and loaded from the app's directory, so you
-# normally don't set AR_ENV_FILE. To edit settings from the /config page, set
-# AR_CONFIG_EDIT=1 (run behind a login -- secrets are write-only in the form).
-# AR_CONFIG_EDIT=1
-# AR_ENV_FILE=/path/to/.env      # only if your .env is elsewhere
+# --- Login & config editor -----------------------------------------------
+# Login is MANDATORY: on first run the console sends you to a setup page to
+# create a username + password (stored hashed here as AR_WEB_PASSWORD_HASH).
+# You normally don't set these by hand. The /config page edits THIS file
+# directly; secrets are write-only there.
 
 # --- Local music library (use instead of Plex) ---------------------------
 # Point at a folder of music files to power the want-list / M3U export without

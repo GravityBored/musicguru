@@ -3,8 +3,8 @@ import re
 
 import requests
 from flask import (
-    Blueprint, Response, abort, jsonify, redirect, render_template, request,
-    send_file, session, stream_with_context, url_for,
+    Blueprint, Response, abort, current_app, jsonify, redirect, render_template,
+    request, send_file, session, stream_with_context, url_for,
 )
 
 from .. import corrections, covers, state
@@ -446,7 +446,7 @@ def config_page():
         "config.html", status=status, login_enabled=auth.login_enabled(),
         editable=envedit.available(),
         auth_on=auth.enabled(),
-        env_file=config.ENV_FILE or "",
+        env_file=config.CONFIG_PATH,
         sections=envedit.fields_for_view() if envedit.available() else {},
     )
 
@@ -493,6 +493,35 @@ def metrics():
         "ar_up 1",
     ]
     return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
+
+
+@bp.route("/setup", methods=["GET", "POST"])
+def setup():
+    """First-run: create the mandatory login. Disabled once credentials exist."""
+    if auth.login_enabled():
+        return redirect(url_for("routes.index_page"))
+    error = None
+    if request.method == "POST":
+        user = request.form.get("username", "").strip()
+        pw = request.form.get("password", "")
+        confirm = request.form.get("confirm", "")
+        if not user or not pw:
+            error = "Username and password are required."
+        elif len(pw) < 8:
+            error = "Use a password of at least 8 characters."
+        elif pw != confirm:
+            error = "The passwords don't match."
+        else:
+            ok, msg = envedit.set_credentials(user, pw)
+            if not ok:
+                error = msg
+            else:
+                current_app.secret_key = auth.secret_key()  # stable across restarts
+                session.permanent = True
+                session["auth"] = True
+                session["user"] = user
+                return redirect(url_for("routes.index_page"))
+    return render_template("setup.html", error=error), (400 if error else 200)
 
 
 @bp.route("/login", methods=["GET", "POST"])

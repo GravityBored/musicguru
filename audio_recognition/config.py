@@ -1,39 +1,45 @@
-"""Configuration. All secrets come from the environment.
+"""Configuration.
 
-A .env file is auto-discovered and loaded at import: AR_ENV_FILE if set, else a
-.env next to the app (its directory or the current working dir). Values already
-in the environment (e.g. from a systemd EnvironmentFile=) are NOT overridden, so
-this is safe to layer on top of any existing setup. The resolved path is also
-what the /config editor writes to.
+Settings live in a single app-owned file, musicguru.conf, in the app's own
+directory (the folder containing the audio_recognition package). It's this
+application's file and nothing else's -- loaded at startup and edited directly
+from the /config page. The file is authoritative: values in it win over any
+ambient environment. A legacy .env in the same directory is migrated to
+musicguru.conf automatically on first run.
 """
 import os
+import shutil
 
-# The app's own directory (the folder containing the audio_recognition package).
-# Config lives here so the whole thing is portable: copy the folder anywhere and
-# its .env travels with it.
+# The app's own directory -- config lives here so the whole thing is portable:
+# copy the folder anywhere and its musicguru.conf travels with it.
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(_APP_DIR, "musicguru.conf")
+_LEGACY_ENV = os.path.join(_APP_DIR, ".env")
 
 
-def _discover_env() -> str:
-    explicit = os.getenv("AR_ENV_FILE")
-    if explicit:
-        return explicit
-    beside_app = os.path.join(_APP_DIR, ".env")
-    if os.path.exists(beside_app):
-        return beside_app
-    cwd_env = os.path.join(os.getcwd(), ".env")
-    if os.path.exists(cwd_env):
-        return cwd_env
-    return beside_app   # default location (may not exist yet; the editor creates it)
-
-
-_ENV_PATH = _discover_env()
-if os.path.exists(_ENV_PATH):
+def _load_conf(path: str) -> None:
+    """Parse KEY=VALUE lines into the environment (the file is authoritative)."""
     try:
-        from dotenv import load_dotenv
-        load_dotenv(_ENV_PATH, override=False)   # env already set wins
-    except ImportError:
-        pass  # python-dotenv not installed; rely on the ambient environment
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+
+
+# One-time migration: if there's no conf yet but an old .env is sitting there,
+# adopt it so existing setups keep working.
+if not os.path.exists(CONFIG_PATH) and os.path.exists(_LEGACY_ENV):
+    try:
+        shutil.copyfile(_LEGACY_ENV, CONFIG_PATH)
+    except OSError:
+        pass
+
+_load_conf(CONFIG_PATH)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -238,13 +244,10 @@ WEB_SECRET_KEY = os.getenv("AR_WEB_SECRET_KEY")
 # Minutes a login stays valid. 0 = until the browser closes.
 WEB_SESSION_HOURS = _env_int("AR_WEB_SESSION_HOURS", 720)
 
-# --- config editor (optional) --------------------------------------------
-# Let the /config page edit the .env file in place. OFF by default because it
-# exposes writing secrets over the web. When enabled, AR_ENV_FILE must point at
-# the SAME .env the app loads at startup, and you should run behind a login
-# (AR_WEB_PASSWORD_HASH). Edits require an app restart to take effect.
-CONFIG_EDIT_ENABLED = _env_bool("AR_CONFIG_EDIT", False)
-ENV_FILE = os.getenv("AR_ENV_FILE") or _ENV_PATH
+# --- config editor -------------------------------------------------------
+# The /config page always edits musicguru.conf (CONFIG_PATH) in place; a login
+# is mandatory (set up on first run), so the editor is protected. Edits take
+# effect on the next restart, except the account credentials, which apply live.
 
 
 # --- scrobbling (optional) ----------------------------------------------

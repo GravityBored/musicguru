@@ -27,6 +27,12 @@ def login_enabled() -> bool:
     return bool(config.WEB_PASSWORD or config.WEB_PASSWORD_HASH)
 
 
+def needs_setup() -> bool:
+    """True on first run: no credentials configured yet, so the user must create
+    them before the console can be used."""
+    return not login_enabled()
+
+
 def enabled() -> bool:
     """Any auth at all is in force."""
     return bool(login_enabled() or config.WEB_TOKEN)

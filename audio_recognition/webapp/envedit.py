@@ -1,7 +1,7 @@
 """Edit a whitelist of AR_* settings in the .env file from the Config page.
 
 Deliberately conservative:
-* OFF unless AR_CONFIG_EDIT=1 and AR_ENV_FILE points at the .env.
+* Always available; a mandatory login protects it.
 * Only the keys in SCHEMA can be written -- no arbitrary env injection.
 * Secret values are never sent to the browser; a blank secret field means
   "keep the current value".
@@ -40,7 +40,7 @@ SCHEMA = [
     ("AR_FP_MATCH_THRESHOLD", "Match threshold (0-1)", "text", "Recognition"),
 
     ("AR_WEB_USER", "Login username", "text", "Web login"),
-    ("AR_WEB_PASSWORD_HASH", "Login password hash", "secret", "Web login"),
+    ("AR_WEB_PASSWORD", "New password (blank = unchanged)", "secret", "Web login"),
 
     ("AR_WATCHDOG_SILENCE_MIN", "Silence alert (min, 0=off)", "int", "Watchdog"),
     ("AR_NOTIFY_URL", "Alert webhook / ntfy URL", "text", "Watchdog"),
@@ -51,7 +51,7 @@ _KINDS = {k: t for k, _l, t, _s in SCHEMA}
 
 
 def available() -> bool:
-    return bool(config.CONFIG_EDIT_ENABLED and config.ENV_FILE)
+    return bool(config.CONFIG_PATH)
 
 
 def _parse(path: str) -> dict:
@@ -85,13 +85,16 @@ def _truthy(v) -> bool:
 def fields_for_view():
     """Schema grouped by section, with current values suitable for the browser:
     non-secrets carry their effective value; secrets carry only is_set."""
-    raw = _parse(config.ENV_FILE) if available() else {}
+    raw = _parse(config.CONFIG_PATH) if available() else {}
     sections: dict[str, list] = {}
     for key, label, kind, section in SCHEMA:
         eff = _effective(key, raw)
         item = {"key": key, "label": label, "kind": kind}
         if kind == "secret":
-            item["is_set"] = bool(eff)
+            if key == "AR_WEB_PASSWORD":
+                item["is_set"] = bool(config.WEB_PASSWORD_HASH or config.WEB_PASSWORD)
+            else:
+                item["is_set"] = bool(eff)
         elif kind == "bool":
             item["checked"] = _truthy(eff)
         else:
@@ -110,14 +113,44 @@ def _sanitize(kind: str, value: str) -> str:
     return value
 
 
+def set_credentials(user: str, password: str) -> tuple[bool, str]:
+    """Write username + hashed password to the config file AND apply them to the
+    running process immediately (so mandatory login takes effect without a
+    restart). Shared by first-run setup and the config editor."""
+    from werkzeug.security import generate_password_hash
+    user = (user or "").strip()
+    if not user or not password:
+        return False, "Username and password are required."
+    pw_hash = generate_password_hash(password)
+    try:
+        _write(config.CONFIG_PATH, {"AR_WEB_USER": user, "AR_WEB_PASSWORD_HASH": pw_hash})
+    except OSError as e:
+        return False, f"Could not write {config.CONFIG_PATH}: {e}"
+    os.environ["AR_WEB_USER"] = user
+    os.environ["AR_WEB_PASSWORD_HASH"] = pw_hash
+    config.WEB_USER = user
+    config.WEB_PASSWORD_HASH = pw_hash
+    config.WEB_PASSWORD = None
+    return True, "Saved."
+
+
 def apply_form(form) -> tuple[bool, str]:
-    """Write submitted values back to the .env. `form` is the request form
+    """Write submitted values back to musicguru.conf. `form` is the request form
     (a multidict). Returns (ok, message)."""
     if not available():
         return False, "Config editing is disabled."
 
+    # A plaintext "New password" is hashed and applied live (username too).
+    new_pw = (form.get("AR_WEB_PASSWORD") or "").strip()
+    if new_pw:
+        ok, msg = set_credentials(form.get("AR_WEB_USER") or config.WEB_USER, new_pw)
+        if not ok:
+            return False, msg
+
     updates: dict[str, str] = {}
     for key in _KEYS:
+        if key == "AR_WEB_PASSWORD":
+            continue  # handled above (never store plaintext)
         kind = _KINDS[key]
         if kind == "bool":
             # unchecked checkboxes are absent from the form
@@ -128,14 +161,16 @@ def apply_form(form) -> tuple[bool, str]:
                 continue  # blank -> keep existing
             updates[key] = _sanitize("secret", v)
         else:
-            if key in form:
+            if key in form and key != "AR_WEB_USER":
                 updates[key] = _sanitize(kind, form.get(key, ""))
+            elif key == "AR_WEB_USER" and not new_pw and form.get(key):
+                updates[key] = _sanitize("text", form.get(key, ""))
 
     try:
-        _write(config.ENV_FILE, updates)
+        _write(config.CONFIG_PATH, updates)
     except OSError as e:
-        return False, f"Could not write {config.ENV_FILE}: {e}"
-    return True, "Saved. Restart the app for changes to take effect."
+        return False, f"Could not write {config.CONFIG_PATH}: {e}"
+    return True, "Saved. Restart the app for other changes to take effect."
 
 
 def _write(path: str, updates: dict) -> None:

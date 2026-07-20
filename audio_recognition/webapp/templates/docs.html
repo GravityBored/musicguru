@@ -149,8 +149,8 @@
   streaming links and a <b>Copy list</b> button that copies <code>Artist - Title</code> lines
   to the clipboard.</p>
   <h3>Stats</h3>
-  <p>Totals (plays, tracks, artists, albums, hours listened) plus <b>match rate</b> (7-day
-  local+Shazam segment recognition rate), current <b>day streak</b>, and listening
+  <p>Totals (plays, tracks, artists, albums, hours listened) plus <b>plays/day</b> (average
+  across the days you actually listened), current <b>day streak</b>, and listening
   <b>sessions</b>. A 24-hour clock shows when you listen (weighted by minutes, not play
   counts), followed by top artists/albums/tracks, genres, artists first heard this week, and
   a GitHub-style calendar heatmap of the last year colored by listening minutes per day.</p>
@@ -257,16 +257,21 @@
   </table>
 
   <h2 id="config">10. Configuration</h2>
-  <p>Every setting is an environment variable. Only <code>AR_DB_PASSWORD</code> is strictly
-  required. A <code>.env</code> is <b>auto-loaded from the app's own directory</b> (the folder
-  containing the <code>audio_recognition</code> package), so the whole thing is portable — copy
-  the folder anywhere and its <code>.env</code> travels with it. Values already in the
-  environment (e.g. a systemd <code>EnvironmentFile=</code>) still win. An
-  <code>.env.example</code> ships in the repo; a populated <code>.env</code> is git-ignored.</p>
-  <p><b>Editing from the console:</b> set <code>AR_CONFIG_EDIT=1</code> to make the
-  <a href="/config">Config page</a> edit that <code>.env</code> in place — a grouped form with
-  secrets write-only (masked; blank keeps the current value). Run it behind a login
-  (<code>AR_WEB_PASSWORD_HASH</code>); changes take effect on the next restart.</p>
+  <p>Settings live in a single app-owned file, <code>musicguru.conf</code>, in the app's own
+  directory (next to the <code>audio_recognition</code> package) — this application's file and
+  nothing else's. It's loaded at startup and is authoritative (it wins over the ambient
+  environment). The whole thing is portable: copy the folder anywhere and its
+  <code>musicguru.conf</code> travels with it. A legacy <code>.env</code> in that directory is
+  migrated automatically on first run. The file is git-ignored; a
+  <code>musicguru.conf.example</code> ships in the repo.</p>
+  <p><b>Edit from the console:</b> the <a href="/config">Config page</a> edits
+  <code>musicguru.conf</code> directly — a grouped form with secrets write-only (masked; blank
+  keeps the current value). Most changes take effect on the next restart; the login
+  username/password apply immediately.</p>
+  <p><b>Login is mandatory.</b> On first run the console sends you to a one-time setup page to
+  create a username and password (stored hashed). After that every visit requires that login;
+  a machine token (<code>AR_WEB_TOKEN</code>) still works for API/health callers. You can
+  change the credentials any time from the Config page.</p>
 
   <h3>Capture &amp; recognition</h3>
   <table>

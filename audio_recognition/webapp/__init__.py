@@ -22,25 +22,30 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-    if auth.enabled():
-        # Endpoints reachable without a session (the login flow and static files).
-        open_endpoints = {"static", "routes.auth_login", "routes.auth_logout"}
+    # Auth is mandatory. Before credentials exist, everything funnels to the
+    # one-time /setup page; afterward, a session or token is required.
+    open_endpoints = {"static", "routes.auth_login", "routes.auth_logout",
+                      "routes.setup"}
 
-        @app.before_request
-        def _gate():
-            if request.endpoint in open_endpoints:
-                return
-            if session.get("auth"):
-                return
-            supplied = request.headers.get("X-Auth-Token") or request.args.get("token", "")
-            if auth.check_token(supplied):
-                return
-            # Humans get the login page; API/machine callers get a clean 401.
-            wants_html = "text/html" in request.headers.get("Accept", "") \
-                and request.method == "GET"
-            if auth.login_enabled() and wants_html:
-                return redirect(url_for("routes.auth_login", next=request.full_path))
+    @app.before_request
+    def _gate():
+        if request.endpoint in open_endpoints:
+            return
+        wants_html = "text/html" in request.headers.get("Accept", "") \
+            and request.method == "GET"
+        if auth.needs_setup():
+            if wants_html:
+                return redirect(url_for("routes.setup"))
             abort(401)
+        if session.get("auth"):
+            return
+        supplied = request.headers.get("X-Auth-Token") or request.args.get("token", "")
+        if auth.check_token(supplied):
+            return
+        # Humans get the login page; API/machine callers get a clean 401.
+        if wants_html:
+            return redirect(url_for("routes.auth_login", next=request.full_path))
+        abort(401)
 
     app.register_blueprint(bp)
     return app
