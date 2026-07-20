@@ -470,6 +470,8 @@ def releases():
     if not rels:
         rels = musicbrainz.search_releases(artist, title)
         source = "musicbrainz"
+    log.info("Release lookup for %s - %s: %d result(s) via %s",
+             artist, title, len(rels), source)
     return jsonify({"releases": rels, "source": source})
 
 
