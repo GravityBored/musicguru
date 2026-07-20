@@ -198,6 +198,12 @@
   <p>Enable with <code>AR_TIDAL_ENABLED=1</code> and click <b>Connect Tidal</b> on the Config
   page (device login — approve a <code>link.tidal.com</code> URL). No developer app; the session
   refreshes itself, so you authorize once.</p>
+  <h3>Auto-playlist</h3>
+  <p>Have every newly heard track appended to a running playlist automatically. Set one playlist
+  name and toggle it per service (Spotify, Tidal, Plex) on the Config page. Each distinct track
+  is added once per service, and that dedupe survives restarts, so the playlist becomes a living
+  record of everything the room has played. A track that isn't on a given service is simply
+  skipped there.</p>
   <h3>Last.fm scrobbling</h3>
   <p>Set <code>AR_SCROBBLE=1</code> plus <code>AR_LASTFM_API_KEY</code>,
   <code>AR_LASTFM_SECRET</code>, and a one-time session key. Get the session key with:</p>

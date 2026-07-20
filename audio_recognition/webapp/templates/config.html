@@ -128,6 +128,13 @@
     <span class="grow"></span>
   </div>
 
+  <div class="row">
+    <span class="name">Auto-playlist</span>
+    {% if status.autoplaylist.targets %}<span class="badge ok">on</span>{% else %}<span class="badge off">off</span>{% endif %}
+    <span class="grow"></span>
+    <span class="opt">{% if status.autoplaylist.targets %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') }}{% else %}enable per service below{% endif %}</span>
+  </div>
+
   {% if not status.spotify.configured %}
   <h2>Set up Spotify</h2>
   <p>Create a free app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a>, add a redirect URI that points back at this console, then set:</p>

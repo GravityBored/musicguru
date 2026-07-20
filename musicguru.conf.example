@@ -99,3 +99,11 @@ AR_TIDAL_ENABLED=0
 # Point at a folder of music files to power the want-list / M3U export without
 # Plex. Scanned once (tags via mutagen). Plex wins if both are set.
 # AR_LOCAL_LIBRARY_PATH=/srv/music
+
+# --- Auto-playlist -------------------------------------------------------
+# Append every newly heard track to a running playlist on each enabled service
+# (deduped per service). Toggle these from the /config page too.
+AR_AUTO_PLAYLIST_NAME=musicguru - heard
+AR_AUTO_PLAYLIST_SPOTIFY=0
+AR_AUTO_PLAYLIST_TIDAL=0
+AR_AUTO_PLAYLIST_PLEX=0

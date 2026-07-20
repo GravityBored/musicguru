@@ -10,6 +10,7 @@ from flask import (
 from .. import corrections, covers, state
 from .. import config
 from .. import library
+from .. import autoplaylist
 from . import auth
 from . import envedit
 from ..services import spotify
@@ -441,6 +442,8 @@ def config_page():
         "tidal": {"configured": tidal.configured(),
                   "connected": tidal.connected() if tidal.configured() else False},
         "lastfm": {"configured": bool(LASTFM_API_KEY)},
+        "autoplaylist": {"targets": autoplaylist.targets(),
+                         "name": config.AUTO_PLAYLIST_NAME},
     }
     return render_template(
         "config.html", status=status, login_enabled=auth.login_enabled(),

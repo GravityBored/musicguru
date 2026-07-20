@@ -31,6 +31,11 @@ SCHEMA = [
 
     ("AR_TIDAL_ENABLED", "Enabled", "bool", "Tidal"),
 
+    ("AR_AUTO_PLAYLIST_NAME", "Playlist name", "text", "Auto-playlist"),
+    ("AR_AUTO_PLAYLIST_SPOTIFY", "Add to Spotify", "bool", "Auto-playlist"),
+    ("AR_AUTO_PLAYLIST_TIDAL", "Add to Tidal", "bool", "Auto-playlist"),
+    ("AR_AUTO_PLAYLIST_PLEX", "Add to Plex", "bool", "Auto-playlist"),
+
     ("AR_LASTFM_API_KEY", "API key", "secret", "Last.fm"),
     ("AR_LASTFM_SECRET", "Shared secret", "secret", "Last.fm"),
     ("AR_LASTFM_SESSION_KEY", "Session key", "secret", "Last.fm"),

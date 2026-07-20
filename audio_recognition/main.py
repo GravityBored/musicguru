@@ -6,7 +6,7 @@ import sys
 import time
 from threading import Thread
 
-from . import config, corrections, covers, fingerprint, notify, publish, scrobble, state
+from . import autoplaylist, config, corrections, covers, fingerprint, notify, publish, scrobble, state
 from .audio.capture import record_and_normalize
 from .config import (
     EMA_ALPHA,
@@ -230,6 +230,7 @@ async def loop_pipeline() -> None:
             # External side effects, all no-ops unless configured.
             await asyncio.to_thread(scrobble.now_playing, track.artist, track.title,
                                     track.album, track.duration)
+            await asyncio.to_thread(autoplaylist.add, track.artist, track.title)
             await asyncio.to_thread(publish.now_playing, {
                 "title": track.title, "artist": track.artist, "album": track.album,
                 "genre": track.genre, "duration": track.duration,

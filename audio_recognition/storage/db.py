@@ -303,6 +303,13 @@ def ensure_schema() -> None:
                 " data MEDIUMBLOB NOT NULL,"
                 " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS auto_playlist_log ("
+                " service VARCHAR(16) NOT NULL,"
+                " match_key VARCHAR(512) NOT NULL,"
+                " added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " PRIMARY KEY (service, match_key))"
+            )
             conn.commit()
         log.info("Schema ensured.")
     except mysql.connector.Error as e:
@@ -310,6 +317,34 @@ def ensure_schema() -> None:
 
 
 # --- corrections ---------------------------------------------------------
+
+def autoplaylist_seen(service: str, match_key: str) -> bool:
+    """Whether this track was already added to the auto-playlist on this service
+    (deduped across restarts)."""
+    try:
+        with _cursor() as (_c, cur):
+            cur.execute(
+                "SELECT 1 FROM auto_playlist_log WHERE service=%s AND match_key=%s",
+                (service, match_key[:512]),
+            )
+            return cur.fetchone() is not None
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_seen failed: %s", e)
+        return False
+
+
+def autoplaylist_mark(service: str, match_key: str) -> None:
+    """Record that we've handled this track for this service."""
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute(
+                "INSERT IGNORE INTO auto_playlist_log (service, match_key) VALUES (%s, %s)",
+                (service, match_key[:512]),
+            )
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_mark failed: %s", e)
+
 
 def load_corrections() -> dict:
     try:

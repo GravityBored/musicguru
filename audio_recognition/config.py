@@ -218,6 +218,15 @@ TIDAL_TOKEN_CACHE = os.getenv(
     "AR_TIDAL_TOKEN_CACHE",
     os.path.join(_APP_DIR, "tidal-session.json"),
 )
+
+# --- auto-playlist -------------------------------------------------------
+# Continuously append every newly heard track to a playlist on each enabled
+# service. One shared playlist name; toggle per service. Tracks are de-duplicated
+# (each distinct song added once per service), and the dedupe survives restarts.
+AUTO_PLAYLIST_NAME = os.getenv("AR_AUTO_PLAYLIST_NAME", "musicguru - heard")
+AUTO_PLAYLIST_SPOTIFY = _env_bool("AR_AUTO_PLAYLIST_SPOTIFY", False)
+AUTO_PLAYLIST_TIDAL = _env_bool("AR_AUTO_PLAYLIST_TIDAL", False)
+AUTO_PLAYLIST_PLEX = _env_bool("AR_AUTO_PLAYLIST_PLEX", False)
 # When False (the default), generated playlists point at this app's /stream/<id>
 # proxy instead of embedding X-Plex-Token in a file you hand to other people.
 PLAYLIST_EMBED_TOKEN = _env_bool("AR_PLAYLIST_EMBED_TOKEN", False)
