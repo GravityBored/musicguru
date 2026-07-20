@@ -80,9 +80,10 @@
       <span class="spacer" style="flex:1"></span>
       <button class="btn" id="selectAll">Select all matching</button>
       <button class="btn" id="clearSel">Clear</button>
-      <button class="btn" id="createPl">Add to Plex playlist</button>
+      {% if plex_on %}<button class="btn" id="createPl">Add to Plex playlist</button>{% endif %}
       <button class="btn" id="createSp">Create Spotify playlist</button>
       <button class="btn" id="createTd">Create Tidal playlist</button>
+      <button class="btn" id="exportList">Copy list</button>
       <button class="btn primary" id="download">Download playlist</button>
     </div>
   </div>
@@ -771,7 +772,7 @@
     paintSel();
   });
 
-  $("createPl").addEventListener("click", async () => {
+  if ($("createPl")) $("createPl").addEventListener("click", async () => {
     const ids = [...selected.keys()];
     if (!ids.length) return;
     const name = prompt("Plex playlist name", "Heard on the stereo");
@@ -789,6 +790,32 @@
         + (js.skipped ? `, skipped ${js.skipped} not in Plex.` : "."));
     } catch { flash("Couldn't create the playlist."); }
     finally { $("createPl").disabled = false; }
+  });
+
+  $("exportList").addEventListener("click", async () => {
+    const ids = [...selected.keys()];
+    if (!ids.length) return;
+    try {
+      const res = await fetch(authed("/export_list"), {
+        method: "POST",
+        headers: hdrs({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) { flash("Couldn't build the list."); return; }
+      const text = await res.text();
+      const n = text.trim() ? text.trim().split("\n").length : 0;
+      try {
+        await navigator.clipboard.writeText(text);
+        flash(`Copied ${n} tracks to the clipboard (Artist - Title).`);
+      } catch {
+        // clipboard blocked (non-HTTPS etc.) -> fall back to a download
+        const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+        const a = document.createElement("a");
+        a.href = url; a.download = "tracks.txt"; a.click();
+        URL.revokeObjectURL(url);
+        flash(`Exported ${n} tracks as tracks.txt.`);
+      }
+    } catch { flash("Couldn't build the list."); }
   });
 
   $("createSp").addEventListener("click", async () => {

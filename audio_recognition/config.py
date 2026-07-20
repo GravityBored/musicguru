@@ -8,22 +8,27 @@ what the /config editor writes to.
 """
 import os
 
+# The app's own directory (the folder containing the audio_recognition package).
+# Config lives here so the whole thing is portable: copy the folder anywhere and
+# its .env travels with it.
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def _discover_env() -> str | None:
+
+def _discover_env() -> str:
     explicit = os.getenv("AR_ENV_FILE")
     if explicit:
         return explicit
-    here = os.path.dirname(os.path.abspath(__file__))          # .../audio_recognition
-    app_dir = os.path.dirname(here)                            # the app's directory
-    for cand in (os.path.join(app_dir, ".env"),
-                 os.path.join(os.getcwd(), ".env")):
-        if os.path.exists(cand):
-            return cand
-    return None
+    beside_app = os.path.join(_APP_DIR, ".env")
+    if os.path.exists(beside_app):
+        return beside_app
+    cwd_env = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(cwd_env):
+        return cwd_env
+    return beside_app   # default location (may not exist yet; the editor creates it)
 
 
 _ENV_PATH = _discover_env()
-if _ENV_PATH and os.path.exists(_ENV_PATH):
+if os.path.exists(_ENV_PATH):
     try:
         from dotenv import load_dotenv
         load_dotenv(_ENV_PATH, override=False)   # env already set wins
@@ -163,6 +168,16 @@ PLEX_MUSIC_SECTION = os.getenv("AR_PLEX_MUSIC_SECTION")
 # a fast indexed title search server-side, but they're run concurrently so the
 # page loads in seconds rather than minutes. Raise/lower to taste.
 PLEX_CONCURRENCY = _env_int("AR_PLEX_CONCURRENCY", 12)
+
+# --- Local music library (works without Plex) ----------------------------
+# If you don't run Plex, point this at a folder of music files. It's scanned
+# once (tags read with mutagen) into the same title->artist index Plex uses, so
+# the want-list and the "in library" badge work, and playlists export as an M3U
+# of the real file paths (portable, plays in any player). Plex, if configured,
+# takes precedence; this is the fallback.
+LOCAL_LIBRARY_PATH = os.getenv("AR_LOCAL_LIBRARY_PATH")
+LOCAL_LIBRARY_EXTS = os.getenv(
+    "AR_LOCAL_LIBRARY_EXTS", ".mp3,.flac,.m4a,.ogg,.opus,.wav,.aac,.wma")
 
 # --- Spotify (playlist export) -------------------------------------------
 # Create a Spotify playlist from selected/recognized tracks. Requires a free

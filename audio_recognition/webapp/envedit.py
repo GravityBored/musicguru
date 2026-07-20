@@ -22,6 +22,8 @@ SCHEMA = [
     ("AR_PLEX_MUSIC_SECTION", "Music library name", "text", "Plex"),
     ("AR_PLEX_CONCURRENCY", "Lookup concurrency", "int", "Plex"),
 
+    ("AR_LOCAL_LIBRARY_PATH", "Music folder (Plex alternative)", "text", "Local library"),
+
     ("AR_SPOTIFY_CLIENT_ID", "Client ID", "text", "Spotify"),
     ("AR_SPOTIFY_CLIENT_SECRET", "Client secret", "secret", "Spotify"),
     ("AR_SPOTIFY_REDIRECT_URI", "Redirect URI", "text", "Spotify"),

@@ -40,6 +40,7 @@
     button.save:hover { filter: brightness(1.07); }
     .tdbox { margin: 6px 0 4px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 2px; background: var(--panel); font-size: 13px; color: #cfd3d9; }
     .tdbox a { color: var(--lamp); word-break: break-all; }
+    .opt { color: var(--ink-faint); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -85,6 +86,13 @@
     <span class="name">Plex</span>
     {% if status.plex.configured %}<span class="badge ok">configured</span>{% else %}<span class="badge off">not set</span>{% endif %}
     <span class="grow"></span>
+  </div>
+
+  <div class="row">
+    <span class="name">Local library</span>
+    {% if status.local.configured %}<span class="badge ok">active</span>{% else %}<span class="badge off">not set</span>{% endif %}
+    <span class="grow"></span>
+    <span class="opt">{% if status.library.backend %}used for want-list &amp; M3U: {{ status.library.backend }}{% else %}no library — playlists via Spotify/Tidal or the text export{% endif %}</span>
   </div>
 
   <div class="row">
@@ -141,10 +149,12 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
   <h2>Playlist destinations</h2>
   <p>Select tracks in the console, then export them:</p>
   <ul>
-    <li><strong>Plex</strong> — native playlist, or an M3U download of the in-library matches.</li>
+    <li><strong>Plex</strong> — native playlist, or an M3U of the in-library matches.</li>
+    <li><strong>Local folder</strong> — set a music folder above and Download playlist emits an M3U of the real file paths; no Plex needed.</li>
     <li><strong>Spotify</strong> — native playlist, once connected above. Tracks are matched by title/artist search.</li>
     <li><strong>Tidal</strong> — native playlist, once authorized (device login). Matched by title/artist search.</li>
     <li><strong>Apple Music</strong> — requires a paid Apple Developer account and browser-side MusicKit authorization; use the per-track Apple links or a transfer service (Soundiiz/TuneMyMusic) in the meantime.</li>
+    <li><strong>Text list</strong> — Copy list exports plain “Artist - Title” lines for any selection, even with no library, for pasting into Soundiiz/TuneMyMusic.</li>
   </ul>
 
   <div class="note">Full reference for every setting is on the <a id="helpLink" href="/docs">Help page</a> and in <code>audio_recognition/config.py</code>.</div>

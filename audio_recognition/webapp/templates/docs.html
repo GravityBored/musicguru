@@ -135,26 +135,37 @@
   <h3>Tracks</h3>
   <p>The full archive, one row per play, with infinite scroll. Search by title/artist/album,
   filter by genre, and sort by recently played, most played, artist, title, album, or first
-  heard. <b>Merge variants</b> folds remasters/live/<code>feat.</code> versions of the same
-  song into one row. Each row shows whether the track is in your Plex library, streaming
+  heard. A <b>When</b> row (Today / Yesterday / Last 7 days / custom date range) narrows to a
+  time window — day boundaries are computed in your local timezone against the UTC-stored
+  plays. <b>Merge variants</b> folds remasters/live/<code>feat.</code> versions of the same
+  song into one row. Each row shows whether the track is in your library, streaming
   search links (Spotify, Apple Music, TIDAL), and a <b>Fix</b> button (see
   <a href="#corrections">§6</a>). Click a row with an album to reveal album trivia.</p>
   <h3>History</h3>
-  <p>Chronological play-by-play, grouped by day.</p>
+  <p>Chronological play-by-play, grouped by day. Honors the same search/genre/date filters.</p>
   <h3>Want-list</h3>
-  <p>Distinct tracks you've heard that are <i>not</i> in your Plex library — an acquisition
-  list — with streaming links and a <b>Copy list</b> button that copies
-  <code>Artist - Title</code> lines to the clipboard. Requires Plex to be configured.</p>
+  <p>Distinct tracks you've heard that are <i>not</i> in your library — Plex, or a local music
+  folder if you don't run Plex (see <a href="#integrations">§7</a>) — an acquisition list with
+  streaming links and a <b>Copy list</b> button that copies <code>Artist - Title</code> lines
+  to the clipboard.</p>
   <h3>Stats</h3>
   <p>Totals (plays, tracks, artists, albums, hours listened) plus <b>match rate</b> (7-day
   local+Shazam segment recognition rate), current <b>day streak</b>, and listening
   <b>sessions</b>. A 24-hour clock shows when you listen (weighted by minutes, not play
   counts), followed by top artists/albums/tracks, genres, artists first heard this week, and
   a GitHub-style calendar heatmap of the last year colored by listening minutes per day.</p>
-  <h3>Selection actions</h3>
-  <p>Select rows (or "select all matching") to <b>Download playlist</b> as an M3U of the
-  matching tracks found in Plex, or <b>Add to Plex playlist</b> to create/append a real Plex
-  audio playlist from them.</p>
+  <h3>Selection actions &amp; playlists</h3>
+  <p>Select rows (or "select all matching", which respects the current filters — so
+  "everything played today" is one click) and turn them into a playlist:</p>
+  <ul>
+    <li><b>Add to Plex playlist</b> — creates/append a real Plex audio playlist (Plex only).</li>
+    <li><b>Create Spotify playlist</b> / <b>Create Tidal playlist</b> — native playlists on
+      those services once connected in <a href="#config">Config</a>; tracks matched by search.</li>
+    <li><b>Download playlist</b> — an M3U of the matches found in your library: Plex stream
+      URLs, or the real file paths when using a local folder.</li>
+    <li><b>Copy list</b> — plain <code>Artist - Title</code> text for any selection, no library
+      needed, for pasting into a transfer service.</li>
+  </ul>
 
   <h2 id="corrections">6. Corrections <span class="pill">self-healing</span></h2>
   <p>Shazam mishears sometimes. The <b>Fix</b> button on any row relabels that track as
@@ -169,7 +180,22 @@
   <p>With <code>AR_PLEX_BASE_URL</code> and <code>AR_PLEX_TOKEN</code>, the console checks each
   track against your library, streams in-library tracks through a token-free
   <code>/stream/&lt;id&gt;</code> proxy, exports M3U playlists, and creates/append Plex audio
-  playlists.</p>
+  playlists. Large libraries are handled by looking up only your recognized tracks,
+  concurrently (<code>AR_PLEX_CONCURRENCY</code>).</p>
+  <h3>Local music library (no Plex needed)</h3>
+  <p>No Plex? Point <code>AR_LOCAL_LIBRARY_PATH</code> at a folder of music files. It's scanned
+  once (tags via mutagen, filename fallback) into the same title→artist index, so the want-list
+  and the "in library" badge work, and <b>Download playlist</b> emits an M3U of the real file
+  paths — portable and playable in any player. Plex takes precedence when both are set.</p>
+  <h3>Spotify playlists</h3>
+  <p>Create a free app at developer.spotify.com, set <code>AR_SPOTIFY_CLIENT_ID</code>,
+  <code>AR_SPOTIFY_CLIENT_SECRET</code>, and <code>AR_SPOTIFY_REDIRECT_URI</code> (pointing at
+  this console), then click <b>Connect Spotify</b> on the Config page once. Selected tracks are
+  matched by search and added to a new playlist.</p>
+  <h3>Tidal playlists</h3>
+  <p>Enable with <code>AR_TIDAL_ENABLED=1</code> and click <b>Connect Tidal</b> on the Config
+  page (device login — approve a <code>link.tidal.com</code> URL). No developer app; the session
+  refreshes itself, so you authorize once.</p>
   <h3>Last.fm scrobbling</h3>
   <p>Set <code>AR_SCROBBLE=1</code> plus <code>AR_LASTFM_API_KEY</code>,
   <code>AR_LASTFM_SECRET</code>, and a one-time session key. Get the session key with:</p>
@@ -217,9 +243,12 @@
     <tr><td>DELETE</td><td><code>/api/play/&lt;id&gt;</code></td><td>Delete one play</td></tr>
     <tr><td>POST</td><td><code>/api/forget</code></td><td>Forget a track (all its plays)</td></tr>
     <tr><td>POST</td><td><code>/api/fix</code></td><td>Relabel + remember a correction</td></tr>
-    <tr><td>GET</td><td><code>/api/wantlist</code></td><td>Heard-but-not-in-Plex tracks</td></tr>
+    <tr><td>GET</td><td><code>/api/wantlist</code></td><td>Heard-but-not-in-library tracks</td></tr>
     <tr><td>POST</td><td><code>/download_playlist</code></td><td>M3U of selected in-library tracks</td></tr>
+    <tr><td>POST</td><td><code>/export_list</code></td><td>Plain Artist - Title text list (no library needed)</td></tr>
     <tr><td>POST</td><td><code>/create_plex_playlist</code></td><td>Create/append a Plex audio playlist</td></tr>
+    <tr><td>POST</td><td><code>/create_spotify_playlist</code>, <code>/create_tidal_playlist</code></td><td>Native Spotify/Tidal playlists</td></tr>
+    <tr><td>GET</td><td><code>/config</code></td><td>Integration status + optional .env editor</td></tr>
     <tr><td>GET</td><td><code>/stream/&lt;id&gt;</code></td><td>Token-free Plex stream proxy</td></tr>
     <tr><td>GET</td><td><code>/cover/&lt;id&gt;</code>, <code>/cover/now</code></td><td>Cover art (disk→DB→source)</td></tr>
     <tr><td>GET</td><td><code>/album_trivia</code></td><td>Album trivia for a row</td></tr>
@@ -229,8 +258,15 @@
 
   <h2 id="config">10. Configuration</h2>
   <p>Every setting is an environment variable. Only <code>AR_DB_PASSWORD</code> is strictly
-  required. Load a <code>.env</code> before launch (systemd <code>EnvironmentFile=</code> or
-  <code>python-dotenv</code>); an <code>.env.example</code> ships in the repo.</p>
+  required. A <code>.env</code> is <b>auto-loaded from the app's own directory</b> (the folder
+  containing the <code>audio_recognition</code> package), so the whole thing is portable — copy
+  the folder anywhere and its <code>.env</code> travels with it. Values already in the
+  environment (e.g. a systemd <code>EnvironmentFile=</code>) still win. An
+  <code>.env.example</code> ships in the repo; a populated <code>.env</code> is git-ignored.</p>
+  <p><b>Editing from the console:</b> set <code>AR_CONFIG_EDIT=1</code> to make the
+  <a href="/config">Config page</a> edit that <code>.env</code> in place — a grouped form with
+  secrets write-only (masked; blank keeps the current value). Run it behind a login
+  (<code>AR_WEB_PASSWORD_HASH</code>); changes take effect on the next restart.</p>
 
   <h3>Capture &amp; recognition</h3>
   <table>

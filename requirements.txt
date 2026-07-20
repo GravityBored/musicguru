@@ -4,6 +4,7 @@ python-dotenv>=1.0
 mysql-connector-python>=9.0
 requests>=2.31
 Pillow>=10.0
+mutagen>=1.47
 pydub>=0.25
 shazamio>=0.4
 PlexAPI>=4.15

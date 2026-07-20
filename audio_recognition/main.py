@@ -288,6 +288,9 @@ def main() -> int:
     corrections.load()
     if fingerprint.available():
         fingerprint.load()
+    from .services import local_library
+    if local_library.configured():
+        local_library.index()   # warm the folder scan (blocking, one-time)
 
     display_text("Identifying Audio")
     try:

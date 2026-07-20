@@ -9,10 +9,12 @@ from flask import (
 
 from .. import corrections, covers, state
 from .. import config
+from .. import library
 from . import auth
 from . import envedit
 from ..services import spotify
 from ..services import tidal
+from ..services import local_library
 from ..config import (
     ARCHIVE_MAX_LIMIT, LASTFM_API_KEY, LASTFM_TIMEOUT, PLAYLIST_EMBED_TOKEN,
     PLEX_BASE_URL, PLEX_TOKEN,
@@ -103,10 +105,10 @@ def in_library():
     """Which of these are actually in Plex? The playlist silently skips the rest."""
     payload = request.get_json(silent=True) or {}
     tracks = payload.get("tracks") or []
-    if not plex.configured():
+    if not library.configured():
         return jsonify({"configured": False, "found": {}})
     rows = [t for t in tracks[:60] if t.get("id") is not None]
-    present = plex.presence_batch([(t.get("artist", ""), t.get("title", "")) for t in rows])
+    present = library.presence_batch([(t.get("artist", ""), t.get("title", "")) for t in rows])
     found = {str(t["id"]): present.get((t.get("artist", ""), t.get("title", "")), False)
              for t in rows}
     return jsonify({"configured": True, "found": found})
@@ -136,6 +138,9 @@ def download_playlist():
     ids = payload.get("ids") or []
     if not isinstance(ids, list) or not ids:
         return jsonify({"error": "Select at least one track."}), 400
+    if not library.configured():
+        return jsonify({"error": "No music library configured (set up Plex or a "
+                        "local folder in Config)."}), 400
 
     tracks = store.get_tracks_by_ids(ids)
     if not tracks:
@@ -143,21 +148,23 @@ def download_playlist():
 
     lines, missing = ["#EXTM3U"], []
     for t in tracks:
-        match = plex.find_track(t["artist"], t["title"])
-        if not match:
+        r = library.resolve(t["artist"], t["title"])
+        if not r:
             missing.append(f"{t['artist']} - {t['title']}")
             continue
-        duration = t.get("duration") or match.get("duration") or -1
+        duration = t.get("duration") or r.get("duration") or -1
         lines.append(f"#EXTINF:{int(duration)},{t['artist']} - {t['title']}")
-        if PLAYLIST_EMBED_TOKEN:
-            lines.append(f"{PLEX_BASE_URL}{match['part_key']}?X-Plex-Token={PLEX_TOKEN}")
+        if r["backend"] == "local":
+            lines.append(r["location"])                       # a real file path
+        elif PLAYLIST_EMBED_TOKEN:
+            lines.append(f"{PLEX_BASE_URL}{r['part_key']}?X-Plex-Token={PLEX_TOKEN}")
         else:
             lines.append(url_for("routes.stream", track_id=t["id"], _external=True))
 
     if len(lines) == 1:
-        return jsonify({"error": "None of these are in your Plex library."}), 404
+        return jsonify({"error": f"None of these were found in {library.name()}."}), 404
     if missing:
-        log.info("Not in Plex, skipped: %s", "; ".join(missing))
+        log.info("Not in library, skipped: %s", "; ".join(missing))
 
     return Response(
         "\n".join(lines) + "\n",
@@ -167,6 +174,20 @@ def download_playlist():
             "X-Skipped-Count": str(len(missing)),
         },
     )
+
+
+@bp.route("/export_list", methods=["POST"])
+def export_list():
+    """A plain 'Artist - Title' text list of the selected tracks -- needs no
+    library at all, for pasting into a transfer service or keeping a record."""
+    payload = request.get_json(silent=True) or {}
+    ids = payload.get("ids") or []
+    if not ids:
+        return jsonify({"error": "Select at least one track."}), 400
+    tracks = store.get_tracks_by_ids(ids)
+    body = "\n".join(f"{t['artist']} - {t['title']}" for t in tracks) + "\n"
+    return Response(body, mimetype="text/plain",
+                    headers={"Content-Disposition": 'attachment; filename="tracks.txt"'})
 
 
 @bp.route("/stream/<int:track_id>")
@@ -272,13 +293,12 @@ def healthz():
 
 @bp.route("/api/wantlist")
 def wantlist():
-    """Distinct recognized tracks that Plex does NOT have -- an acquisition list.
-    All the Plex checks run concurrently and are cached, so it scales to large
-    libraries without a per-track network stall."""
-    if not plex.configured():
+    """Distinct recognized tracks NOT in your library (Plex or a local folder) --
+    an acquisition list. Checks run concurrently and are cached."""
+    if not library.configured():
         return jsonify({"configured": False, "tracks": []})
     rows = store.get_distinct_tracks(cap=600)
-    present = plex.presence_batch([(r["artist"], r["title"]) for r in rows])
+    present = library.presence_batch([(r["artist"], r["title"]) for r in rows])
     out = [r for r in rows if not present.get((r["artist"], r["title"]), False)]
     return jsonify({"configured": True, "tracks": out[:200]})
 
@@ -414,6 +434,8 @@ def create_tidal_playlist():
 def config_page():
     status = {
         "plex": {"configured": plex.configured()},
+        "local": {"configured": local_library.configured()},
+        "library": {"backend": library.name()},
         "spotify": {"configured": spotify.configured(),
                     "connected": spotify.connected() if spotify.configured() else False},
         "tidal": {"configured": tidal.configured(),
@@ -504,7 +526,7 @@ def auth_logout():
 def index_page():
     from .. import __version__
     return render_template("index.html", login_enabled=auth.login_enabled(),
-                           version=__version__)
+                           version=__version__, plex_on=plex.configured())
 
 
 @bp.route("/docs")
