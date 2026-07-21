@@ -386,7 +386,7 @@ def autoplaylist_enqueue(service: str, match_key: str, artist: str, title: str,
 
 def autoplaylist_queue_pending(max_attempts: int, limit: int = 50) -> list[dict]:
     try:
-        with _cursor() as (_c, cur):
+        with _cursor(dictionary=True) as (_c, cur):
             cur.execute(
                 "SELECT service, match_key, artist, title, album, attempts "
                 "FROM auto_playlist_queue WHERE attempts < %s "
@@ -426,7 +426,7 @@ def autoplaylist_queue_remove(service: str, match_key: str) -> None:
 
 def autoplaylist_queue_depth() -> int:
     try:
-        with _cursor() as (_c, cur):
+        with _cursor(dictionary=True) as (_c, cur):
             cur.execute("SELECT COUNT(*) c FROM auto_playlist_queue")
             r = cur.fetchone()
             return int(r["c"]) if r else 0
@@ -438,7 +438,7 @@ def distinct_tracks_for_backfill(cap: int = 5000) -> list[dict]:
     """Distinct (artist, title, album) across the archive -- to seed the queue
     with everything already heard."""
     try:
-        with _cursor() as (_c, cur):
+        with _cursor(dictionary=True) as (_c, cur):
             cur.execute(
                 "SELECT artist, title, MAX(album) album FROM recognized_songs "
                 "GROUP BY artist, title LIMIT %s", (cap,))
@@ -480,7 +480,7 @@ def set_album_override(artist: str, title: str, album: str, cover_url: str = Non
 
 def get_album_override(artist: str, title: str) -> dict | None:
     try:
-        with _cursor() as (_c, cur):
+        with _cursor(dictionary=True) as (_c, cur):
             cur.execute(
                 "SELECT album, cover_url FROM album_overrides WHERE artist=%s AND title=%s",
                 (artist[:255], title[:255]),
