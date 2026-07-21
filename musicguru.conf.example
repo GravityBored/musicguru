@@ -118,3 +118,5 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_LOG_FILE=/var/log/musicguru.log
 # AR_LOG_LEVEL=INFO
 # AR_LOG_BACKUP_DAYS=14
+# AR_AUTO_PLAYLIST_RETRY_SEC=120     # background retry interval for queued adds
+# AR_AUTO_PLAYLIST_MAX_ATTEMPTS=30   # give up on a track+service after this many tries

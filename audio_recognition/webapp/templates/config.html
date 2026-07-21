@@ -133,9 +133,10 @@
 
   <div class="row">
     <span class="name">Auto-playlist</span>
-    {% if status.autoplaylist.targets %}<span class="badge ok">on</span>{% else %}<span class="badge off">off</span>{% endif %}
+    {% if status.autoplaylist.targets %}<span class="badge ok">on</span>{% elif status.autoplaylist.enabled %}<span class="badge warn">waiting</span>{% else %}<span class="badge off">off</span>{% endif %}
     <span class="grow"></span>
-    <span class="opt">{% if status.autoplaylist.targets %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') }}{% else %}enable per service below{% endif %}</span>
+    <span class="opt">{% if status.autoplaylist.enabled %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') or 'connect a service' }}{% if status.autoplaylist.queued %} · {{ status.autoplaylist.queued }} queued{% endif %}{% else %}enable per service below{% endif %}</span>
+    {% if status.autoplaylist.enabled %}<button type="button" class="btn" id="apBackfill">Sync all heard</button>{% endif %}
   </div>
 
   {% if not status.spotify.configured %}
@@ -191,6 +192,21 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
       if (s === "connected") { f.className = "flash ok"; f.textContent = "Spotify connected."; }
       else if (s === "denied") { f.className = "flash bad"; f.textContent = "Spotify authorization was declined."; }
       else if (s === "failed") { f.className = "flash bad"; f.textContent = "Spotify authorization failed — check your app credentials and redirect URI."; }
+    }
+
+    // Auto-playlist backfill
+    var apBtn = document.getElementById("apBackfill");
+    if (apBtn) {
+      apBtn.addEventListener("click", function () {
+        apBtn.disabled = true; apBtn.textContent = "Queuing…";
+        fetch(authed("/api/autoplaylist/backfill"), { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            apBtn.textContent = j.error ? "Sync all heard" : ("Queued " + j.queued);
+            apBtn.disabled = !!j.error;
+          })
+          .catch(function () { apBtn.textContent = "Sync all heard"; apBtn.disabled = false; });
+      });
     }
 
     // Capture-device lister (helps set line-in vs mic)

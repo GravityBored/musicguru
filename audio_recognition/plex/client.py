@@ -191,6 +191,14 @@ def in_library(artist: str, title: str) -> bool:
     return _match(artist, title) is not None
 
 
+def match_rating_key(artist: str, title: str, album: str = None) -> str | None:
+    """Rating key of a matching library track, for adding to a playlist. Unlike
+    find_track this does NOT require a streamable part_key -- a track can be in a
+    playlist even if the search result didn't carry its media parts."""
+    m = _match(artist, title, album)
+    return m.get("rating_key") if m else None
+
+
 def presence_batch(pairs: list) -> dict:
     """Check many (artist, title) pairs at once, concurrently. Returns
     {(artist, title): bool}. Used by the want-list and the in-library badge so a
@@ -251,7 +259,18 @@ def create_or_append_playlist(title: str, rating_keys: list) -> dict:
         log.debug("Plex playlist list failed: %s", e)
 
     if existing is not None:
-        existing.addItems(items)
+        try:
+            existing.addItems(items)
+        except Exception as e:
+            # Some Plex versions reject a whole batch if one item is already in
+            # the playlist; fall back to adding individually so one dup or bad
+            # item doesn't block the rest.
+            log.debug("Plex addItems batch failed (%s); adding individually", e)
+            for it in items:
+                try:
+                    existing.addItems([it])
+                except Exception as e2:
+                    log.debug("Plex addItem skipped: %s", e2)
         return {"created": False, "playlist_key": str(existing.ratingKey)}
 
     from plexapi.playlist import Playlist

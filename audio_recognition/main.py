@@ -77,6 +77,24 @@ def _parse_hours(spec: str):
         return 0, 24
 
 
+async def _autoplaylist_worker() -> None:
+    """Retry outstanding auto-playlist adds on an interval, so tracks queued
+    while a service was down eventually make it in. No-op when nothing's queued."""
+    interval = max(15, config.AUTO_PLAYLIST_RETRY_SEC)
+    while not _stop.is_set():
+        try:
+            await asyncio.wait_for(_stop.wait(), timeout=interval)
+            break
+        except asyncio.TimeoutError:
+            pass
+        if not autoplaylist.enabled():
+            continue
+        try:
+            await asyncio.to_thread(autoplaylist.flush)
+        except Exception as e:
+            log.debug("Auto-playlist flush error: %s", e)
+
+
 async def _watchdog() -> None:
     """Fire a one-shot alert if the capture input goes silent for too long
     during active hours -- catches an unplugged stereo or a dead USB capture
@@ -239,7 +257,8 @@ async def loop_pipeline() -> None:
             # External side effects, all no-ops unless configured.
             await asyncio.to_thread(scrobble.now_playing, track.artist, track.title,
                                     track.album, track.duration)
-            await asyncio.to_thread(autoplaylist.add, track.artist, track.title)
+            await asyncio.to_thread(autoplaylist.note_played, track.artist,
+                                    track.title, track.album)
             await asyncio.to_thread(publish.now_playing, {
                 "title": track.title, "artist": track.artist, "album": track.album,
                 "genre": track.genre, "duration": track.duration,
@@ -279,11 +298,12 @@ async def _run() -> None:
 
     pipeline = asyncio.create_task(loop_pipeline())
     watchdog = asyncio.create_task(_watchdog())
+    autopl = asyncio.create_task(_autoplaylist_worker())
     await _stop.wait()
     log.info("Shutting down...")
-    for task in (pipeline, watchdog):
+    for task in (pipeline, watchdog, autopl):
         task.cancel()
-    for task in (pipeline, watchdog):
+    for task in (pipeline, watchdog, autopl):
         try:
             await task
         except asyncio.CancelledError:

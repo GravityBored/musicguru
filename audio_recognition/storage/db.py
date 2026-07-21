@@ -320,6 +320,18 @@ def ensure_schema() -> None:
                 "   ON UPDATE CURRENT_TIMESTAMP,"
                 " PRIMARY KEY (artist, title))"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS auto_playlist_queue ("
+                " service VARCHAR(16) NOT NULL,"
+                " match_key VARCHAR(512) NOT NULL,"
+                " artist VARCHAR(255) NOT NULL,"
+                " title VARCHAR(255) NOT NULL,"
+                " album VARCHAR(512),"
+                " attempts INT NOT NULL DEFAULT 0,"
+                " last_attempt DATETIME NULL,"
+                " queued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " PRIMARY KEY (service, match_key))"
+            )
             conn.commit()
         log.info("Schema ensured.")
     except mysql.connector.Error as e:
@@ -354,6 +366,86 @@ def autoplaylist_mark(service: str, match_key: str) -> None:
             conn.commit()
     except mysql.connector.Error as e:
         log.warning("autoplaylist_mark failed: %s", e)
+
+
+def autoplaylist_enqueue(service: str, match_key: str, artist: str, title: str,
+                         album: str = None) -> None:
+    """Queue a heard track for adding to a service (no-op if already queued)."""
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute(
+                "INSERT IGNORE INTO auto_playlist_queue "
+                "(service, match_key, artist, title, album) VALUES (%s, %s, %s, %s, %s)",
+                (service, match_key[:512], artist[:255], title[:255],
+                 (album[:512] if album else None)),
+            )
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_enqueue failed: %s", e)
+
+
+def autoplaylist_queue_pending(max_attempts: int, limit: int = 50) -> list[dict]:
+    try:
+        with _cursor() as (_c, cur):
+            cur.execute(
+                "SELECT service, match_key, artist, title, album, attempts "
+                "FROM auto_playlist_queue WHERE attempts < %s "
+                "ORDER BY last_attempt IS NULL DESC, last_attempt ASC LIMIT %s",
+                (max_attempts, limit),
+            )
+            return cur.fetchall() or []
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_queue_pending failed: %s", e)
+        return []
+
+
+def autoplaylist_queue_attempt(service: str, match_key: str) -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute(
+                "UPDATE auto_playlist_queue SET attempts=attempts+1, "
+                "last_attempt=UTC_TIMESTAMP() WHERE service=%s AND match_key=%s",
+                (service, match_key[:512]),
+            )
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_queue_attempt failed: %s", e)
+
+
+def autoplaylist_queue_remove(service: str, match_key: str) -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute(
+                "DELETE FROM auto_playlist_queue WHERE service=%s AND match_key=%s",
+                (service, match_key[:512]),
+            )
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_queue_remove failed: %s", e)
+
+
+def autoplaylist_queue_depth() -> int:
+    try:
+        with _cursor() as (_c, cur):
+            cur.execute("SELECT COUNT(*) c FROM auto_playlist_queue")
+            r = cur.fetchone()
+            return int(r["c"]) if r else 0
+    except mysql.connector.Error:
+        return 0
+
+
+def distinct_tracks_for_backfill(cap: int = 5000) -> list[dict]:
+    """Distinct (artist, title, album) across the archive -- to seed the queue
+    with everything already heard."""
+    try:
+        with _cursor() as (_c, cur):
+            cur.execute(
+                "SELECT artist, title, MAX(album) album FROM recognized_songs "
+                "GROUP BY artist, title LIMIT %s", (cap,))
+            return cur.fetchall() or []
+    except mysql.connector.Error as e:
+        log.warning("distinct_tracks_for_backfill failed: %s", e)
+        return []
 
 
 def set_album_override(artist: str, title: str, album: str, cover_url: str = None) -> int:

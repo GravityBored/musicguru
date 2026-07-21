@@ -232,6 +232,11 @@ AUTO_PLAYLIST_NAME = os.getenv("AR_AUTO_PLAYLIST_NAME", "musicguru - heard")
 AUTO_PLAYLIST_SPOTIFY = _env_bool("AR_AUTO_PLAYLIST_SPOTIFY", False)
 AUTO_PLAYLIST_TIDAL = _env_bool("AR_AUTO_PLAYLIST_TIDAL", False)
 AUTO_PLAYLIST_PLEX = _env_bool("AR_AUTO_PLAYLIST_PLEX", False)
+# A heard track is queued per enabled service and added by a background worker
+# that retries on this interval until it succeeds (or gives up after N attempts),
+# so a service being briefly down/disconnected no longer drops tracks.
+AUTO_PLAYLIST_RETRY_SEC = _env_int("AR_AUTO_PLAYLIST_RETRY_SEC", 120)
+AUTO_PLAYLIST_MAX_ATTEMPTS = _env_int("AR_AUTO_PLAYLIST_MAX_ATTEMPTS", 30)
 # When False (the default), generated playlists point at this app's /stream/<id>
 # proxy instead of embedding X-Plex-Token in a file you hand to other people.
 PLAYLIST_EMBED_TOKEN = _env_bool("AR_PLAYLIST_EMBED_TOKEN", False)

@@ -332,9 +332,9 @@ def create_plex_playlist():
 
     keys, missing = [], []
     for t in store.get_tracks_by_ids(ids):
-        match = plex.find_track(t["artist"], t["title"])
-        if match and match.get("rating_key"):
-            keys.append(match["rating_key"])
+        rk = plex.match_rating_key(t["artist"], t["title"], t.get("album"))
+        if rk:
+            keys.append(rk)
         else:
             missing.append(f"{t['artist']} - {t['title']}")
     if not keys:
@@ -443,7 +443,9 @@ def config_page():
                   "connected": tidal.connected() if tidal.configured() else False},
         "lastfm": {"configured": bool(LASTFM_API_KEY)},
         "autoplaylist": {"targets": autoplaylist.targets(),
-                         "name": config.AUTO_PLAYLIST_NAME},
+                         "name": config.AUTO_PLAYLIST_NAME,
+                         "enabled": autoplaylist.enabled(),
+                         "queued": store.autoplaylist_queue_depth()},
     }
     return render_template(
         "config.html", status=status, login_enabled=auth.login_enabled(),
@@ -486,6 +488,14 @@ def set_release():
         return jsonify({"error": "artist, title, and album are required."}), 400
     n = store.set_album_override(artist, title, album, cover_url)
     return jsonify({"album": album, "relabeled": n})
+
+
+@bp.route("/api/autoplaylist/backfill", methods=["POST"])
+def autoplaylist_backfill():
+    if not autoplaylist.enabled():
+        return jsonify({"error": "No auto-playlist services are enabled."}), 400
+    queued = autoplaylist.backfill()
+    return jsonify({"queued": queued})
 
 
 @bp.route("/api/capture_devices")

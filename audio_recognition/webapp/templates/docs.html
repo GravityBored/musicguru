@@ -216,6 +216,13 @@
   is added once per service, and that dedupe survives restarts, so the playlist becomes a living
   record of everything the room has played. A track that isn't on a given service is simply
   skipped there.</p>
+  <p>Adds are <b>queued and retried</b>: hearing a track just enqueues it, and a background worker
+  (every <code>AR_AUTO_PLAYLIST_RETRY_SEC</code>, default 120s) does the actual adding, retrying up
+  to <code>AR_AUTO_PLAYLIST_MAX_ATTEMPTS</code> times. So a service being briefly disconnected, rate
+  limited, or down no longer drops tracks — they wait in the queue and go in once it recovers. The
+  Config page shows the queue depth and whether each service is connected. <b>Sync all heard</b>
+  there queues every track already in your archive, to backfill a playlist after enabling it (or
+  after an outage). For Plex, a track must exist in your Plex library to be added.</p>
   <h3>Last.fm scrobbling</h3>
   <p>Set <code>AR_SCROBBLE=1</code> plus <code>AR_LASTFM_API_KEY</code>,
   <code>AR_LASTFM_SECRET</code>, and a one-time session key. Get the session key with:</p>
