@@ -91,7 +91,7 @@ def flush(limit: int = 25) -> int:
         return 0
     ready = {s: _service_ready(s) for s in set(r["service"] for r in rows)}
     name = config.AUTO_PLAYLIST_NAME
-    added = 0
+    added = skipped = deferred = 0
     for row in rows:
         svc, key = row["service"], row["match_key"]
         if not ready.get(svc):
@@ -106,12 +106,17 @@ def flush(limit: int = 25) -> int:
                 log.info("Auto-playlist: added %s - %s to %s",
                          row["artist"], row["title"], svc)
             else:
+                skipped += 1
                 log.info("Auto-playlist: %s - %s not found on %s (skipping)",
                          row["artist"], row["title"], svc)
         except Exception as e:
+            deferred += 1
             db.autoplaylist_queue_attempt(svc, key)   # transient; retry later
             log.warning("Auto-playlist %s failed for %s - %s (will retry): %s",
                         svc, row["artist"], row["title"], e)
+    if added or skipped or deferred:
+        log.info("Auto-playlist flush: %d added, %d skipped, %d deferred; %d still queued",
+                 added, skipped, deferred, db.autoplaylist_queue_depth())
     return added
 
 
