@@ -78,21 +78,25 @@ def _parse_hours(spec: str):
 
 
 async def _autoplaylist_worker() -> None:
-    """Retry outstanding auto-playlist adds on an interval, so tracks queued
-    while a service was down eventually make it in. No-op when nothing's queued."""
-    interval = max(15, config.AUTO_PLAYLIST_RETRY_SEC)
+    """Drain the auto-playlist queue. While a backlog is being worked, loop back
+    quickly so Plex empties as fast as the network allows; when nothing is ready
+    (queue empty, or a service backing off), idle until the next poll."""
+    idle = max(15, config.AUTO_PLAYLIST_RETRY_SEC)
+    busy_pause = 2
     while not _stop.is_set():
+        pause = idle
+        if autoplaylist.enabled():
+            try:
+                await asyncio.to_thread(autoplaylist.flush)
+                if await asyncio.to_thread(autoplaylist.has_pending):
+                    pause = busy_pause   # more ready work -> come right back
+            except Exception as e:
+                log.debug("Auto-playlist flush error: %s", e)
         try:
-            await asyncio.wait_for(_stop.wait(), timeout=interval)
+            await asyncio.wait_for(_stop.wait(), timeout=pause)
             break
         except asyncio.TimeoutError:
             pass
-        if not autoplaylist.enabled():
-            continue
-        try:
-            await asyncio.to_thread(autoplaylist.flush)
-        except Exception as e:
-            log.debug("Auto-playlist flush error: %s", e)
 
 
 async def _watchdog() -> None:

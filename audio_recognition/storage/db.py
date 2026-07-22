@@ -384,14 +384,21 @@ def autoplaylist_enqueue(service: str, match_key: str, artist: str, title: str,
         log.warning("autoplaylist_enqueue failed: %s", e)
 
 
-def autoplaylist_queue_pending(max_attempts: int, limit: int = 50) -> list[dict]:
+def autoplaylist_queue_pending(max_attempts: int, limit: int = 50,
+                               service: str = None) -> list[dict]:
     try:
         with _cursor(dictionary=True) as (_c, cur):
+            where = "attempts < %s"
+            params = [max_attempts]
+            if service:
+                where += " AND service = %s"
+                params.append(service)
+            params.append(limit)
             cur.execute(
                 "SELECT service, match_key, artist, title, album, attempts "
-                "FROM auto_playlist_queue WHERE attempts < %s "
+                f"FROM auto_playlist_queue WHERE {where} "
                 "ORDER BY last_attempt IS NULL DESC, last_attempt ASC LIMIT %s",
-                (max_attempts, limit),
+                tuple(params),
             )
             return cur.fetchall() or []
     except mysql.connector.Error as e:

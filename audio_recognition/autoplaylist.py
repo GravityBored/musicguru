@@ -85,22 +85,47 @@ def enqueue(artist: str, title: str, album: str = None) -> None:
         db.autoplaylist_enqueue(svc, key, artist, title, al)
 
 
-def flush(limit: int = 25) -> int:
-    """Attempt outstanding queued adds for services that are ready. Returns the
-    number of tracks added. Safe to call often; a no-op when the queue is empty."""
-    rows = db.autoplaylist_queue_pending(config.AUTO_PLAYLIST_MAX_ATTEMPTS, limit)
-    if not rows:
-        return 0
-    ready = {s: _service_ready(s) for s in set(r["service"] for r in rows)}
-    name = config.AUTO_PLAYLIST_NAME
+import threading
+import time
+
+_flush_lock = threading.Lock()
+_backoff_until: dict[str, float] = {}   # service -> epoch seconds to resume
+_consec_fail: dict[str, int] = {}       # service -> consecutive-error count
+
+
+def _in_backoff(svc: str) -> bool:
+    return time.time() < _backoff_until.get(svc, 0)
+
+
+def _note_error(svc: str) -> None:
+    """Escalating backoff after an error response (mainly Tidal rate limits)."""
+    n = _consec_fail.get(svc, 0) + 1
+    _consec_fail[svc] = n
+    base = config.AUTO_PLAYLIST_TIDAL_BACKOFF_SEC
+    wait = min(base * (2 ** (n - 1)), config.AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC)
+    _backoff_until[svc] = time.time() + wait
+    log.warning("Auto-playlist: backing off %s for %ds after an error (streak %d)",
+                svc, wait, n)
+
+
+def _batch_for(svc: str) -> int:
+    if svc == "plex":
+        return config.AUTO_PLAYLIST_PLEX_BATCH
+    return config.AUTO_PLAYLIST_TIDAL_BATCH
+
+
+def _drain_service(svc: str, name: str) -> tuple:
+    """Process one batch for a ready service. Returns
+    (added, present, skipped, deferred, errored). Stops the batch on the first
+    error so a rate-limited service can back off instead of hammering."""
+    rows = db.autoplaylist_queue_pending(config.AUTO_PLAYLIST_MAX_ATTEMPTS,
+                                         _batch_for(svc), service=svc)
     added = present = skipped = deferred = 0
+    errored = False
     for row in rows:
-        svc, key = row["service"], row["match_key"]
-        if not ready.get(svc):
-            continue   # service not usable right now; leave for a later flush
+        key = row["match_key"]
         try:
             status = _add_one(svc, name, row["artist"], row["title"], row.get("album"))
-            # added / present / absent are all "handled" -> stop retrying.
             db.autoplaylist_mark(svc, key)
             db.autoplaylist_queue_remove(svc, key)
             if status == "added":
@@ -117,14 +142,49 @@ def flush(limit: int = 25) -> int:
                          row["artist"], row["title"], svc)
         except Exception as e:
             deferred += 1
-            db.autoplaylist_queue_attempt(svc, key)   # transient; retry later
+            errored = True
+            db.autoplaylist_queue_attempt(svc, key)   # sink to back of the queue
             log.warning("Auto-playlist %s failed for %s - %s (will retry): %s",
                         svc, row["artist"], row["title"], e)
-    if added or present or skipped or deferred:
-        log.info("Auto-playlist flush: %d added, %d already-in, %d not-found, "
-                 "%d deferred; %d still queued", added, present, skipped, deferred,
-                 db.autoplaylist_queue_depth())
-    return added
+            break   # back off rather than keep hitting a rate-limited service
+    if not errored and (added or present or skipped):
+        _consec_fail[svc] = 0   # clean pass -> reset backoff escalation
+    return added, present, skipped, deferred, errored
+
+
+def flush(limit: int = 25) -> int:
+    """Drain queued adds for each ready service. Plex drains a large chunk each
+    cycle (as fast as the network allows); Tidal drains a smaller burst and backs
+    off when it hits an error. Single-run: overlapping calls no-op. Returns tracks
+    added this cycle."""
+    if not _flush_lock.acquire(blocking=False):
+        return 0
+    try:
+        name = config.AUTO_PLAYLIST_NAME
+        added = present = skipped = deferred = 0
+        for svc in _enabled_services():
+            if not _service_ready(svc) or _in_backoff(svc):
+                continue
+            a, p, s, d, errored = _drain_service(svc, name)
+            added += a; present += p; skipped += s; deferred += d
+            if errored:
+                _note_error(svc)
+        if added or present or skipped or deferred:
+            log.info("Auto-playlist flush: %d added, %d already-in, %d not-found, "
+                     "%d deferred; %d still queued", added, present, skipped, deferred,
+                     db.autoplaylist_queue_depth())
+        return added
+    finally:
+        _flush_lock.release()
+
+
+def has_pending() -> bool:
+    """Whether any queued item is ready to attempt now (used to pace the worker)."""
+    for svc in _enabled_services():
+        if _service_ready(svc) and not _in_backoff(svc):
+            if db.autoplaylist_queue_pending(config.AUTO_PLAYLIST_MAX_ATTEMPTS, 1, service=svc):
+                return True
+    return False
 
 
 def note_played(artist: str, title: str, album: str = None) -> None:

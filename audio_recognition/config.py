@@ -237,6 +237,13 @@ AUTO_PLAYLIST_PLEX = _env_bool("AR_AUTO_PLAYLIST_PLEX", False)
 # so a service being briefly down/disconnected no longer drops tracks.
 AUTO_PLAYLIST_RETRY_SEC = _env_int("AR_AUTO_PLAYLIST_RETRY_SEC", 120)
 AUTO_PLAYLIST_MAX_ATTEMPTS = _env_int("AR_AUTO_PLAYLIST_MAX_ATTEMPTS", 30)
+# Per-service pacing. Plex is local -> drain a big chunk each cycle. Tidal is
+# rate-limited -> smaller bursts, and on any error response back off for a
+# spell (escalating up to the max) before trying it again.
+AUTO_PLAYLIST_PLEX_BATCH = _env_int("AR_AUTO_PLAYLIST_PLEX_BATCH", 200)
+AUTO_PLAYLIST_TIDAL_BATCH = _env_int("AR_AUTO_PLAYLIST_TIDAL_BATCH", 25)
+AUTO_PLAYLIST_TIDAL_BACKOFF_SEC = _env_int("AR_AUTO_PLAYLIST_TIDAL_BACKOFF_SEC", 30)
+AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC = _env_int("AR_AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC", 900)
 # When False (the default), generated playlists point at this app's /stream/<id>
 # proxy instead of embedding X-Plex-Token in a file you hand to other people.
 PLAYLIST_EMBED_TOKEN = _env_bool("AR_PLAYLIST_EMBED_TOKEN", False)

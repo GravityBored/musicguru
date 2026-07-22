@@ -120,3 +120,7 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_LOG_BACKUP_DAYS=14
 # AR_AUTO_PLAYLIST_RETRY_SEC=120     # background retry interval for queued adds
 # AR_AUTO_PLAYLIST_MAX_ATTEMPTS=30   # give up on a track+service after this many tries
+# AR_AUTO_PLAYLIST_PLEX_BATCH=200          # Plex adds per drain cycle (local, fast)
+# AR_AUTO_PLAYLIST_TIDAL_BATCH=25          # Tidal adds per burst
+# AR_AUTO_PLAYLIST_TIDAL_BACKOFF_SEC=30    # base backoff after a Tidal error
+# AR_AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC=900
