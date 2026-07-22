@@ -99,10 +99,14 @@ def _viewer_commands() -> list:
     """Viewer command-lines to try, in order. AR_DISPLAY_CMD overrides (use
     {file} for the image path; {w}/{h} for the configured size).
 
-    The image is already rendered at exactly AR_DISPLAY_W x AR_DISPLAY_H, so the
-    viewers are told NOT to rescale it -- otherwise feh --fullscreen / fbi -a
-    stretch it to the panel and the size setting has no visible effect. Set
-    AR_DISPLAY_SCALE=1 to let the viewer scale to fill instead.
+    The canvas is pre-rendered at exactly AR_DISPLAY_W x AR_DISPLAY_H, so the job
+    of the viewer is simply to show it without resizing:
+
+    * feh --fullscreen scales images DOWN to fit but never up, so a canvas at or
+      under the panel size is shown 1:1, centred on black. That's what we want --
+      scaling up is --auto-zoom, which we only add when AR_DISPLAY_SCALE is on.
+    * fbi -a autoscales (it WILL enlarge to fill), so -a is only used when
+      AR_DISPLAY_SCALE is on.
     """
     w, h = config.DISPLAY_SIZE
     custom = (getattr(config, "DISPLAY_CMD", "") or "").strip()
@@ -112,18 +116,18 @@ def _viewer_commands() -> list:
                  for p in custom.split()]]
     fb = getattr(config, "DISPLAY_FB", "/dev/fb0")
     scale = bool(getattr(config, "DISPLAY_SCALE", False))
+
+    feh = ["feh", "--fullscreen", "--hide-pointer",
+           "--reload", str(config.FEH_RELOAD_SEC)]
     if scale:
-        feh = ["feh", "--fullscreen", "--hide-pointer",
-               "--reload", str(config.FEH_RELOAD_SEC), config.COVER_ART_FILE]
-        fbi = ["fbi", "-d", fb, "-T", "1", "-noverbose", "-a",
-               "-cachemem", "0", config.COVER_ART_FILE]
-    else:
-        # Render 1:1 at the configured size, centred on the panel.
-        feh = ["feh", "--fullscreen", "--no-scale", "--hide-pointer",
-               "--geometry", f"{w}x{h}",
-               "--reload", str(config.FEH_RELOAD_SEC), config.COVER_ART_FILE]
-        fbi = ["fbi", "-d", fb, "-T", "1", "-noverbose",
-               "-cachemem", "0", config.COVER_ART_FILE]
+        feh.insert(2, "--auto-zoom")     # stretch up to fill the screen
+    feh.append(config.COVER_ART_FILE)
+
+    fbi = ["fbi", "-d", fb, "-T", "1", "-noverbose", "-cachemem", "0"]
+    if scale:
+        fbi.append("-a")                 # fbi's autoscale enlarges to fill
+    fbi.append(config.COVER_ART_FILE)
+
     return [feh, fbi, ["fbv", "-d", fb, "-f", "-r", config.COVER_ART_FILE]]
 
 
