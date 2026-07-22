@@ -202,11 +202,15 @@ def resize_and_display(img_data: bytes) -> None:
     iw, ih = img.size
     if iw == 0 or ih == 0:
         return
+    # Fit within a box that is DISPLAY_ART_PERCENT of the canvas, so the art can
+    # be deliberately smaller than the screen instead of filling it.
+    pct = max(10, min(100, int(getattr(config, "DISPLAY_ART_PERCENT", 100)))) / 100.0
+    bw, bh = max(1, int(sw * pct)), max(1, int(sh * pct))
     ratio = iw / ih
-    if sw / sh > ratio:
-        new_w, new_h = max(1, int(sh * ratio)), sh
+    if bw / bh > ratio:
+        new_w, new_h = max(1, int(bh * ratio)), bh
     else:
-        new_w, new_h = sw, max(1, int(sw / ratio))
+        new_w, new_h = bw, max(1, int(bw / ratio))
 
     canvas = Image.new("RGB", config.DISPLAY_SIZE, "black")
     canvas.paste(img.resize((new_w, new_h), Image.LANCZOS), ((sw - new_w) // 2, (sh - new_h) // 2))

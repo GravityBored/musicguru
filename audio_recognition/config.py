@@ -139,6 +139,10 @@ DISPLAY_FB = os.getenv("AR_DISPLAY_FB", "/dev/fb0")
 # Off: the image is drawn at exactly DISPLAY_SIZE and shown 1:1 (centred).
 # On: let the viewer stretch it to fill the physical panel.
 DISPLAY_SCALE = _env_bool("AR_DISPLAY_SCALE", False)
+# How much of the canvas the artwork itself fills, as a percentage. 100 = as
+# large as the canvas allows (letterboxed); lower values draw the art smaller
+# and centred, leaving a border -- i.e. art that isn't "fullscreen".
+DISPLAY_ART_PERCENT = max(10, min(100, _env_int("AR_DISPLAY_ART_PERCENT", 100)))
 FONT_PATH = os.getenv(
     "AR_FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 )

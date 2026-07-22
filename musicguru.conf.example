@@ -131,3 +131,4 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_DISPLAY_CMD=          # blank = auto (feh -> fbi -> fbv); {file} = image path
 # AR_DISPLAY_FB=/dev/fb0
 # AR_DISPLAY_SCALE=0     # 1 = let the viewer stretch the image to fill the panel
+# AR_DISPLAY_ART_PERCENT=100  # how much of the screen the artwork fills (10-100)
