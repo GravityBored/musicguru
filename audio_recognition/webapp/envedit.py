@@ -47,6 +47,7 @@ SCHEMA = [
     ("AR_SPOTIFY_PLAYLIST_PUBLIC", "Public playlists", "bool", "Spotify"),
 
     ("AR_AUTO_PLAYLIST_NAME", "Playlist name", "text", "Auto-playlist"),
+    ("AR_AUTO_PLAYLIST_MIN_PLAYS", "Add after this many plays", "int", "Auto-playlist"),
     ("AR_AUTO_PLAYLIST_SPOTIFY", "Add to Spotify", "bool", "Auto-playlist"),
     ("AR_AUTO_PLAYLIST_TIDAL", "Add to Tidal", "bool", "Auto-playlist"),
     ("AR_AUTO_PLAYLIST_PLEX", "Add to Plex", "bool", "Auto-playlist"),

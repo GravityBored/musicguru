@@ -261,6 +261,10 @@ AUTO_PLAYLIST_PLEX = _env_bool("AR_AUTO_PLAYLIST_PLEX", False)
 # A heard track is queued per enabled service and added by a background worker
 # that retries on this interval until it succeeds (or gives up after N attempts),
 # so a service being briefly down/disconnected no longer drops tracks.
+# Only add a track once it has been heard this many times (1 = add on first
+# play). Lets the playlist reflect what actually gets played rather than every
+# one-off.
+AUTO_PLAYLIST_MIN_PLAYS = max(1, _env_int("AR_AUTO_PLAYLIST_MIN_PLAYS", 1))
 AUTO_PLAYLIST_RETRY_SEC = _env_int("AR_AUTO_PLAYLIST_RETRY_SEC", 120)
 AUTO_PLAYLIST_MAX_ATTEMPTS = _env_int("AR_AUTO_PLAYLIST_MAX_ATTEMPTS", 30)
 # Per-service pacing. Plex is local -> drain a big chunk each cycle. Tidal is

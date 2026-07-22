@@ -471,6 +471,7 @@ def config_page():
                     "size": f"{config.DISPLAY_SIZE[0]}x{config.DISPLAY_SIZE[1]}"},
         "autoplaylist": {"targets": autoplaylist.targets(),
                          "name": config.AUTO_PLAYLIST_NAME,
+                         "min_plays": int(config.AUTO_PLAYLIST_MIN_PLAYS),
                          "enabled": autoplaylist.enabled(),
                          "queued": store.autoplaylist_queue_depth()},
     }

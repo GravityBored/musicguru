@@ -70,12 +70,23 @@ def _add_one(service: str, name: str, artist: str, title: str, album: str = None
     return "absent"
 
 
-def enqueue(artist: str, title: str, album: str = None) -> None:
+def enqueue(artist: str, title: str, album: str = None, plays: int = None) -> None:
     """Queue a newly heard track for each enabled service (skips ones already
-    handled). Cheap; the flush worker does the actual adding."""
+    handled). Cheap; the flush worker does the actual adding.
+
+    A track is only queued once it has been heard AUTO_PLAYLIST_MIN_PLAYS times,
+    so the playlist reflects what actually gets played rather than every one-off.
+    """
     svcs = _enabled_services()
     if not svcs:
         return
+    threshold = max(1, int(config.AUTO_PLAYLIST_MIN_PLAYS))
+    if threshold > 1:
+        n = plays if plays is not None else db.play_count(artist, title)
+        if n < threshold:
+            log.debug("Auto-playlist: %s - %s has %d play(s), needs %d",
+                      artist, title, n, threshold)
+            return
     key = _key(artist, title)
     ov = db.get_album_override(artist, title)
     al = ov["album"] if ov else album
@@ -236,7 +247,10 @@ def backfill() -> int:
     if not svcs:
         return 0
     queued = 0
+    threshold = max(1, int(config.AUTO_PLAYLIST_MIN_PLAYS))
     for r in db.distinct_tracks_for_backfill():
+        if int(r.get("plays") or 0) < threshold:
+            continue
         key = _key(r["artist"], r["title"])
         for svc in svcs:
             if db.autoplaylist_seen(svc, key):

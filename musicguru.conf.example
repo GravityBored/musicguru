@@ -134,3 +134,4 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_DISPLAY_ART_PERCENT=100  # how much of the screen the artwork fills (10-100)
 # AR_WANTLIST_SCAN_CAP=0     # 0 = check every distinct track (no cap)
 # AR_WANTLIST_MAX=0          # 0 = return every confirmed miss (no cap)
+# AR_AUTO_PLAYLIST_MIN_PLAYS=1   # only add a track after it's been heard this many times

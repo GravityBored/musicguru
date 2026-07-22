@@ -155,7 +155,7 @@
     <span class="name">Auto-playlist</span>
     {% if status.autoplaylist.targets %}<span class="badge ok">on</span>{% elif status.autoplaylist.enabled %}<span class="badge warn">waiting</span>{% else %}<span class="badge off">off</span>{% endif %}
     <span class="grow"></span>
-    <span class="opt">{% if status.autoplaylist.enabled %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') or 'connect a service' }}{% if status.autoplaylist.queued %} · {{ status.autoplaylist.queued }} queued{% endif %}{% else %}enable per service below{% endif %}</span>
+    <span class="opt">{% if status.autoplaylist.enabled %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') or 'connect a service' }}{% if status.autoplaylist.min_plays > 1 %} · after {{ status.autoplaylist.min_plays }} plays{% endif %}{% if status.autoplaylist.queued %} · {{ status.autoplaylist.queued }} queued{% endif %}{% else %}enable per service below{% endif %}</span>
     {% if status.autoplaylist.enabled %}<button type="button" class="btn" id="apBackfill">Sync all heard</button>{% endif %}
   </div>
 

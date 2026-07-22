@@ -464,7 +464,7 @@ def distinct_tracks_for_backfill(cap: int = 0) -> list[dict]:
     try:
         with _cursor(dictionary=True) as (_c, cur):
             cur.execute(
-                "SELECT artist, title, MAX(album) album FROM recognized_songs "
+                "SELECT artist, title, MAX(album) album, COUNT(*) plays FROM recognized_songs "
                 "GROUP BY artist, title" + (" LIMIT %s" if cap else ""),
                 ((cap,) if cap else ()))
             return cur.fetchall() or []
@@ -597,6 +597,18 @@ def relabel(old_title, old_artist, new_title, new_artist) -> int:
 
 
 # --- now-playing context / recognition rate ------------------------------
+
+def play_count(artist: str, title: str) -> int:
+    """How many times this track has been logged."""
+    try:
+        with _cursor(dictionary=True) as (_c, cur):
+            cur.execute("SELECT COUNT(*) plays FROM recognized_songs "
+                        "WHERE artist=%s AND title=%s", (artist, title))
+            r = cur.fetchone() or {}
+            return int(r.get("plays") or 0)
+    except mysql.connector.Error:
+        return 0
+
 
 def get_now_context(title, artist) -> dict:
     """Play count and previous last-heard for a track. Call BEFORE inserting the

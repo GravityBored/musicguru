@@ -215,8 +215,11 @@
   page (device login — approve a <code>link.tidal.com</code> URL). No developer app; the session
   refreshes itself, so you authorize once.</p>
   <h3>Auto-playlist</h3>
-  <p>Have every newly heard track appended to a running playlist automatically. Set one playlist
-  name and toggle it per service (Spotify, Tidal, Plex) on the Config page. Each distinct track
+  <p>Have every newly heard track appended to a running playlist automatically. Set the playlist
+  name, a minimum play count, and toggle it per service (Spotify, Tidal, Plex) on the Config
+  page. With <code>AR_AUTO_PLAYLIST_MIN_PLAYS</code> above 1 a track is only added once it has
+  been heard that many times, so the playlist reflects what actually gets played rather than
+  every one-off; the threshold applies to <b>Sync all heard</b> too. Each distinct track
   is added once per service, and that dedupe survives restarts, so the playlist becomes a living
   record of everything the room has played. A track that isn't on a given service is simply
   skipped there. A track already in the playlist (added by hand or on a previous run) is detected and skipped rather than duplicated.</p>
