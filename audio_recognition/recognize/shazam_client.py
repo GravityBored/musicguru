@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from shazamio import Shazam
 
-from ..config import SHAZAM_TIMEOUT
+from .. import config
 
 log = logging.getLogger("audio_recognition.recognize")
 
@@ -104,9 +104,9 @@ def parse_track(raw: dict) -> Track:
 async def recognize(audio_path: str) -> Track | None:
     """Run Shazam recognition on the given file. Returns None if unrecognized."""
     try:
-        res = await asyncio.wait_for(_get_client().recognize(audio_path), timeout=SHAZAM_TIMEOUT)
+        res = await asyncio.wait_for(_get_client().recognize(audio_path), timeout=config.SHAZAM_TIMEOUT)
     except asyncio.TimeoutError:
-        log.warning("Shazam timed out after %.1fs", SHAZAM_TIMEOUT)
+        log.warning("Shazam timed out after %.1fs", config.SHAZAM_TIMEOUT)
         return None
     except Exception as e:
         log.warning("Shazam error: %s", e)

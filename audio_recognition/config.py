@@ -17,8 +17,16 @@ CONFIG_PATH = os.path.join(_APP_DIR, "musicguru.conf")
 _LEGACY_ENV = os.path.join(_APP_DIR, ".env")
 
 
+# Keys this file has put into the environment. Tracked so a reload can drop a
+# setting that was REMOVED from the file (e.g. unchecking a box) instead of
+# leaving the old value behind in os.environ.
+_FILE_KEYS: set = set()
+
+
 def _load_conf(path: str) -> None:
     """Parse KEY=VALUE lines into the environment (the file is authoritative)."""
+    global _FILE_KEYS
+    fresh = {}
     try:
         with open(path) as f:
             for line in f:
@@ -26,9 +34,14 @@ def _load_conf(path: str) -> None:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, v = line.split("=", 1)
-                os.environ[k.strip()] = v.strip()
+                fresh[k.strip()] = v.strip()
     except FileNotFoundError:
         pass
+    # Anything we set last time that's gone now goes away too.
+    for stale in _FILE_KEYS - set(fresh):
+        os.environ.pop(stale, None)
+    os.environ.update(fresh)
+    _FILE_KEYS = set(fresh)
 
 
 # One-time migration: if there's no conf yet but an old .env is sitting there,
@@ -115,7 +128,9 @@ MUSICBRAINZ_TIMEOUT = _env_float("AR_MUSICBRAINZ_TIMEOUT", 6.0)
 MUSICBRAINZ_USER_AGENT = os.getenv("AR_MUSICBRAINZ_UA", "audio_recognition/1.0")
 
 # --- display -------------------------------------------------------------
-DISPLAY_ENABLED = _env_bool("AR_DISPLAY_ENABLED", True)
+# Album art on the attached framebuffer display. Off by default -- most
+# installs are headless; turn it on from the Config page.
+DISPLAY_ENABLED = _env_bool("AR_DISPLAY_ENABLED", False)
 DISPLAY_SIZE = (_env_int("AR_DISPLAY_W", 800), _env_int("AR_DISPLAY_H", 480))
 FONT_PATH = os.getenv(
     "AR_FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -345,12 +360,9 @@ def validate(require_plex: bool = False, require_lastfm: bool = False) -> None:
 # Settings that are bound once at startup and can't be hot-applied: capture
 # hardware (the arecord loop), the log file/handler, and the DB connection pool.
 # Everything else is read live via config.X and picks up a reload immediately.
-RESTART_ONLY_KEYS = {
-    "AR_ALSA_DEVICE", "AR_CAPTURE_CHANNELS", "AR_SAMPLE_RATE", "AR_RECORD_DURATION",
-    "AR_LOG_FILE", "AR_LOG_LEVEL", "AR_LOG_BACKUP_DAYS",
-    "AR_DB_HOST", "AR_DB_PORT", "AR_DB_USER", "AR_DB_PASSWORD", "AR_DB_NAME",
-    "AR_DB_POOL_SIZE",
-}
+# Nothing requires a restart: capture reads its device/format per segment, the
+# log handler is rebuilt on reload, and the DB pool is recreated on demand.
+RESTART_ONLY_KEYS = set()
 
 
 def reload() -> list:
@@ -361,9 +373,13 @@ def reload() -> list:
     import importlib
     import sys as _sys
     before = {k: v for k, v in os.environ.items() if k.startswith("AR_")}
+    tracked = set(_FILE_KEYS)
     _load_conf(CONFIG_PATH)
     after_file = {k: v for k, v in os.environ.items() if k.startswith("AR_")}
-    importlib.reload(_sys.modules[__name__])
+    mod = importlib.reload(_sys.modules[__name__])
+    # importlib.reload re-runs the module body, which resets the tracker; restore
+    # the union so a later removal is still detected.
+    mod._FILE_KEYS |= tracked & set(os.environ)
     changed = [k for k in set(before) | set(after_file)
                if before.get(k) != after_file.get(k)]
     return changed

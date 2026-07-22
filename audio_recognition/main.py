@@ -8,18 +8,7 @@ from threading import Thread
 
 from . import autoplaylist, config, corrections, covers, fingerprint, notify, publish, scrobble, state
 from .audio.capture import record_and_normalize
-from .config import (
-    EMA_ALPHA,
-    ENRICH_ENABLED,
-    SILENCE_RESET_SEGMENTS,
-    UNMATCHED_MIN_SEGMENTS,
-    EMA_PRUNE_EPSILON,
-    EMA_THRESHOLD,
-    FLASK_DEBUG,
-    FLASK_HOST,
-    FLASK_PORT,
-    QUIET_BACKOFF_SEC,
-)
+from . import config
 from .display.image_ops import (
     display_text,
     resize_and_display,
@@ -130,7 +119,7 @@ async def _watchdog() -> None:
 
 
 async def loop_pipeline() -> None:
-    st = EMAState(alpha=EMA_ALPHA, threshold=EMA_THRESHOLD, prune_epsilon=EMA_PRUNE_EPSILON)
+    st = EMAState(alpha=config.EMA_ALPHA, threshold=config.EMA_THRESHOLD, prune_epsilon=config.EMA_PRUNE_EPSILON)
 
     # Ping-pong buffers: the next segment records into the file we are NOT
     # currently recognizing, so capture overlaps recognition/enrichment instead
@@ -155,7 +144,7 @@ async def loop_pipeline() -> None:
         next_capture = asyncio.create_task(record_and_normalize(buffers[idx]))
 
         if not path:
-            if state.note_silence() >= SILENCE_RESET_SEGMENTS:
+            if state.note_silence() >= config.SILENCE_RESET_SEGMENTS:
                 # The room has gone quiet. Close out the current play, clear Now
                 # Playing, and forget the track so the same song replaying later
                 # is logged as a new play.
@@ -166,7 +155,7 @@ async def loop_pipeline() -> None:
                 state_reset(st)
             # A failed capture (busy/misnamed device) can return fast; keep the
             # loop from spinning while the next segment records.
-            await asyncio.sleep(QUIET_BACKOFF_SEC)
+            await asyncio.sleep(config.QUIET_BACKOFF_SEC)
             continue
 
         state.note_signal()
@@ -198,7 +187,7 @@ async def loop_pipeline() -> None:
             # for a sustained run -- brief gaps between/within recognized songs
             # (talking, intros, transitions) don't penalize the match rate.
             miss_run += 1
-            if miss_run >= UNMATCHED_MIN_SEGMENTS:
+            if miss_run >= config.UNMATCHED_MIN_SEGMENTS:
                 await asyncio.to_thread(record_segment, False)
             # No trailing sleep -- the next segment is already recording.
             continue
@@ -218,7 +207,7 @@ async def loop_pipeline() -> None:
             # MusicBrainz duration fallback). Off the loop: it does blocking
             # HTTP. Cached, so a song on repeat is only ever looked up once. A
             # local match already carries enriched metadata, so skip it there.
-            if ENRICH_ENABLED and not getattr(track, "_local", False):
+            if config.ENRICH_ENABLED and not getattr(track, "_local", False):
                 await asyncio.to_thread(enrich_track, track)
 
             # A user-pinned release (chosen in the console) wins over whatever the
@@ -288,7 +277,7 @@ def start_flask() -> None:
     # use_reloader=False: Werkzeug's reloader installs signal handlers, and
     # app.run(debug=True) from a non-main thread raises
     # "ValueError: signal only works in main thread".
-    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG,
+    app.run(host=config.FLASK_HOST, port=config.FLASK_PORT, debug=config.FLASK_DEBUG,
             use_reloader=False, threaded=True)
 
 
@@ -323,7 +312,7 @@ def main() -> int:
         return 2
 
     Thread(target=start_flask, name="flask", daemon=True).start()
-    log.info("Web UI on http://%s:%d", FLASK_HOST, FLASK_PORT)
+    log.info("Web UI on http://%s:%d", config.FLASK_HOST, config.FLASK_PORT)
 
     # Apply migrations and load learned corrections before the loop starts.
     ensure_schema()

@@ -16,6 +16,15 @@ from .. import config
 
 # (key, label, kind, section). kind: text | int | bool | secret
 SCHEMA = [
+    ("AR_LOG_LEVEL", "Log level (DEBUG/INFO/WARNING)", "text", "Logging"),
+    ("AR_LOG_FILE", "Log file path", "text", "Logging"),
+    ("AR_LOG_BACKUP_DAYS", "Days of logs to keep", "int", "Logging"),
+    ("AR_LOG_COLOR", "Console colour (auto/always/never)", "text", "Logging"),
+
+    ("AR_DISPLAY_ENABLED", "Show album art on the display", "bool", "Display"),
+    ("AR_DISPLAY_W", "Display width (px)", "int", "Display"),
+    ("AR_DISPLAY_H", "Display height (px)", "int", "Display"),
+
     ("AR_ALSA_DEVICE", "Capture device (arecord -D)", "text", "Capture"),
     ("AR_CAPTURE_CHANNELS", "Channels (1 mic, 2 line-in)", "int", "Capture"),
     ("AR_SAMPLE_RATE", "Sample rate (Hz)", "int", "Capture"),

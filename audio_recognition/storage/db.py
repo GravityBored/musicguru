@@ -7,7 +7,7 @@ from datetime import datetime
 import mysql.connector
 from mysql.connector import pooling
 
-from ..config import DB_CONFIG, DB_POOL_SIZE, DB_SPOOL_FILE, DB_TIMES_ARE_UTC
+from .. import config
 from ..utils.timezone import utc_to_local_str
 
 log = logging.getLogger("audio_recognition.storage")
@@ -28,14 +28,21 @@ SORTS = {
 _BASE_TITLE = r"REGEXP_REPLACE(title, ' *[\\(\\[].*$', '')"
 
 
+def reset_pool() -> None:
+    """Drop the connection pool so new DB settings are picked up on the next
+    query (no restart needed). Existing checked-out connections finish normally."""
+    global _pool
+    _pool = None
+
+
 def _get_pool() -> pooling.MySQLConnectionPool:
     global _pool
     if _pool is None:
         _pool = pooling.MySQLConnectionPool(
             pool_name="audio_recognition",
-            pool_size=DB_POOL_SIZE,
+            pool_size=config.DB_POOL_SIZE,
             pool_reset_session=True,
-            **DB_CONFIG,
+            **config.DB_CONFIG,
         )
     return _pool
 
@@ -59,7 +66,7 @@ def _cursor(dictionary: bool = False):
 
 def _local_offset_minutes() -> int:
     """Rows are stored UTC; shift them for date/hour bucketing in the UI."""
-    if not DB_TIMES_ARE_UTC:
+    if not config.DB_TIMES_ARE_UTC:
         return 0
     off = datetime.now().astimezone().utcoffset()
     return int(off.total_seconds() // 60) if off else 0
@@ -122,10 +129,10 @@ def _spool(row: dict) -> None:
     try:
         row = dict(row)
         row["ts"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        parent = os.path.dirname(DB_SPOOL_FILE)
+        parent = os.path.dirname(config.DB_SPOOL_FILE)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(DB_SPOOL_FILE, "a") as f:
+        with open(config.DB_SPOOL_FILE, "a") as f:
             f.write(json.dumps(row) + "\n")
         log.warning("Play spooled (DB unavailable): %s - %s", row.get("artist"), row.get("title"))
     except OSError as e:
@@ -135,10 +142,10 @@ def _spool(row: dict) -> None:
 def _flush_spool() -> None:
     """Replay spooled plays in order. Stops at the first row that still fails,
     keeping it and everything after it for the next attempt."""
-    if not (os.path.exists(DB_SPOOL_FILE) and os.path.getsize(DB_SPOOL_FILE) > 0):
+    if not (os.path.exists(config.DB_SPOOL_FILE) and os.path.getsize(config.DB_SPOOL_FILE) > 0):
         return
     try:
-        with open(DB_SPOOL_FILE) as f:
+        with open(config.DB_SPOOL_FILE) as f:
             lines = [ln for ln in f.read().splitlines() if ln.strip()]
     except OSError:
         return
@@ -159,10 +166,10 @@ def _flush_spool() -> None:
 
     try:
         if kept:
-            with open(DB_SPOOL_FILE, "w") as f:
+            with open(config.DB_SPOOL_FILE, "w") as f:
                 f.write("\n".join(kept) + "\n")
         else:
-            os.remove(DB_SPOOL_FILE)
+            os.remove(config.DB_SPOOL_FILE)
         replayed = len(lines) - len(kept)
         if replayed:
             log.info("Replayed %d spooled play(s).", replayed)

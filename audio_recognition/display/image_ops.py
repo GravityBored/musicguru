@@ -10,17 +10,7 @@ from io import BytesIO
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from ..config import (
-    COVER_ART_FILE,
-    DISPLAY_ENABLED,
-    DISPLAY_SIZE,
-    FEH_RELOAD_SEC,
-    FONT_PATH,
-    FONT_SIZE,
-    IMAGE_MAX_BYTES,
-    IMAGE_RETRIES,
-    IMAGE_TIMEOUT,
-)
+from .. import config
 
 log = logging.getLogger("audio_recognition.display")
 
@@ -36,17 +26,17 @@ def _get_font():
     global _font
     if _font is None:
         try:
-            _font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
+            _font = ImageFont.truetype(config.FONT_PATH, config.FONT_SIZE)
         except OSError:
-            log.warning("Font not found at %s; falling back to PIL default", FONT_PATH)
+            log.warning("Font not found at %s; falling back to PIL default", config.FONT_PATH)
             try:
-                _font = ImageFont.load_default(size=FONT_SIZE)  # Pillow >= 10.1
+                _font = ImageFont.load_default(size=config.FONT_SIZE)  # Pillow >= 10.1
             except TypeError:
                 _font = ImageFont.load_default()
     return _font
 
 
-def download_image_with_retries(url, retries=IMAGE_RETRIES, timeout=IMAGE_TIMEOUT):
+def download_image_with_retries(url, retries=config.IMAGE_RETRIES, timeout=config.IMAGE_TIMEOUT):
     """Blocking. Call via asyncio.to_thread from the pipeline."""
     for attempt in range(1, retries + 1):
         try:
@@ -59,8 +49,8 @@ def download_image_with_retries(url, retries=IMAGE_RETRIES, timeout=IMAGE_TIMEOU
                 buf = BytesIO()
                 for chunk in resp.iter_content(64 * 1024):
                     buf.write(chunk)
-                    if buf.tell() > IMAGE_MAX_BYTES:
-                        log.warning("Cover art exceeds %d bytes; aborting", IMAGE_MAX_BYTES)
+                    if buf.tell() > config.IMAGE_MAX_BYTES:
+                        log.warning("Cover art exceeds %d bytes; aborting", config.IMAGE_MAX_BYTES)
                         return None
                 return buf.getvalue()
             log.warning("Attempt %d: image download failed with status %s", attempt, resp.status_code)
@@ -72,15 +62,15 @@ def download_image_with_retries(url, retries=IMAGE_RETRIES, timeout=IMAGE_TIMEOU
 
 
 def display_text(text: str = "Identifying Audio") -> None:
-    if not DISPLAY_ENABLED:
+    if not config.DISPLAY_ENABLED:
         return
-    img = Image.new("RGB", DISPLAY_SIZE, "black")
+    img = Image.new("RGB", config.DISPLAY_SIZE, "black")
     draw = ImageDraw.Draw(img)
     font = _get_font()
     # Subtract the bbox origin; the old code ignored it and drew slightly off-center.
     x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
     w, h = x1 - x0, y1 - y0
-    pos = ((DISPLAY_SIZE[0] - w) // 2 - x0, (DISPLAY_SIZE[1] - h) // 2 - y0)
+    pos = ((config.DISPLAY_SIZE[0] - w) // 2 - x0, (config.DISPLAY_SIZE[1] - h) // 2 - y0)
     draw.text(pos, text, fill="white", font=font)
     buf = BytesIO()
     img.save(buf, "JPEG", quality=90)
@@ -117,8 +107,8 @@ def _ensure_viewer() -> None:
                 "feh",
                 "--fullscreen",
                 "--hide-pointer",
-                "--reload", str(FEH_RELOAD_SEC),
-                COVER_ART_FILE,
+                "--reload", str(config.FEH_RELOAD_SEC),
+                config.COVER_ART_FILE,
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -131,11 +121,11 @@ def _ensure_viewer() -> None:
 
 def resize_and_display(img_data: bytes) -> None:
     global _last_hash
-    if not DISPLAY_ENABLED or not img_data:
+    if not config.DISPLAY_ENABLED or not img_data:
         return
 
     curr_hash = hashlib.md5(img_data).hexdigest()
-    if curr_hash == _last_hash and os.path.exists(COVER_ART_FILE):
+    if curr_hash == _last_hash and os.path.exists(config.COVER_ART_FILE):
         return
 
     try:
@@ -148,7 +138,7 @@ def resize_and_display(img_data: bytes) -> None:
     if img.mode != "RGB":
         img = img.convert("RGB")
 
-    sw, sh = DISPLAY_SIZE
+    sw, sh = config.DISPLAY_SIZE
     iw, ih = img.size
     if iw == 0 or ih == 0:
         return
@@ -158,13 +148,13 @@ def resize_and_display(img_data: bytes) -> None:
     else:
         new_w, new_h = sw, max(1, int(sw / ratio))
 
-    canvas = Image.new("RGB", DISPLAY_SIZE, "black")
+    canvas = Image.new("RGB", config.DISPLAY_SIZE, "black")
     canvas.paste(img.resize((new_w, new_h), Image.LANCZOS), ((sw - new_w) // 2, (sh - new_h) // 2))
 
     try:
-        _atomic_save(canvas, COVER_ART_FILE)
+        _atomic_save(canvas, config.COVER_ART_FILE)
     except OSError as e:
-        log.warning("Could not write %s: %s", COVER_ART_FILE, e)
+        log.warning("Could not write %s: %s", config.COVER_ART_FILE, e)
         return
 
     _last_hash = curr_hash
@@ -191,3 +181,13 @@ def shutdown_display() -> None:
 
 
 atexit.register(shutdown_display)
+
+
+def apply_display_setting() -> None:
+    """Called after a config reload: if the display was turned off, tear down the
+    viewer; nothing to do when turning on (the next track draws to it)."""
+    if not config.DISPLAY_ENABLED:
+        try:
+            shutdown_display()
+        except Exception:
+            pass

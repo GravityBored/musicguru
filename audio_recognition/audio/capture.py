@@ -5,17 +5,7 @@ import os
 from pydub import AudioSegment
 from pydub.effects import normalize
 
-from ..config import (
-    ALSA_DEVICE,
-    AUDIO_FILE,
-    CAPTURE_CHANNELS,
-    DESIRED_AVG_DBFS,
-    NORMALIZATION_HEADROOM_DB,
-    PEAK_MARGIN_DB,
-    RECORD_DURATION,
-    SAMPLE_RATE,
-    SILENCE_THRESHOLD_DB,
-)
+from .. import config
 
 log = logging.getLogger("audio_recognition.audio")
 
@@ -26,10 +16,10 @@ async def _arecord(path: str) -> bool:
         proc = await asyncio.create_subprocess_exec(
             "arecord",
             "-f", "S16_LE",
-            "-c", str(CAPTURE_CHANNELS),
-            "-r", str(SAMPLE_RATE),
-            "-D", ALSA_DEVICE,
-            "-d", str(RECORD_DURATION),
+            "-c", str(config.CAPTURE_CHANNELS),
+            "-r", str(config.SAMPLE_RATE),
+            "-D", config.ALSA_DEVICE,
+            "-d", str(config.RECORD_DURATION),
             path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
@@ -46,7 +36,7 @@ async def _arecord(path: str) -> bool:
     # an uncaught CouldntDecodeError that killed the whole event loop.
     if proc.returncode != 0:
         msg = (stderr or b"").decode(errors="replace").strip()
-        log.error("arecord failed (rc=%s, device=%s): %s", proc.returncode, ALSA_DEVICE, msg)
+        log.error("arecord failed (rc=%s, device=%s): %s", proc.returncode, config.ALSA_DEVICE, msg)
         return False
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         log.error("arecord produced no data at %s", path)
@@ -72,19 +62,19 @@ def _process(path: str):
         raw = raw.set_channels(1)
 
     log.debug("Recorded dBFS: %.2f", raw.dBFS)
-    if raw.dBFS < SILENCE_THRESHOLD_DB:  # -inf for pure silence, compares fine
-        log.info("Audio below %.1f dBFS; skipping segment", SILENCE_THRESHOLD_DB)
+    if raw.dBFS < config.SILENCE_THRESHOLD_DB:  # -inf for pure silence, compares fine
+        log.info("Audio below %.1f dBFS; skipping segment", config.SILENCE_THRESHOLD_DB)
         return None
 
     try:
-        norm = normalize(raw, headroom=NORMALIZATION_HEADROOM_DB)
-        # Peak now sits at -NORMALIZATION_HEADROOM_DB. Clamp the average-level
-        # boost so the peak cannot be driven past -PEAK_MARGIN_DB. The old code
+        norm = normalize(raw, headroom=config.NORMALIZATION_HEADROOM_DB)
+        # Peak now sits at -config.NORMALIZATION_HEADROOM_DB. Clamp the average-level
+        # boost so the peak cannot be driven past -config.PEAK_MARGIN_DB. The old code
         # normalized to -14 dBFS peak and then boosted until the *average* hit
         # -10 dBFS, which pushed peaks well past 0 and hard-clipped int16 --
         # exactly the kind of distortion that ruins a Shazam fingerprint.
-        max_boost = max(0.0, NORMALIZATION_HEADROOM_DB - PEAK_MARGIN_DB)
-        wanted = DESIRED_AVG_DBFS - norm.dBFS
+        max_boost = max(0.0, config.NORMALIZATION_HEADROOM_DB - config.PEAK_MARGIN_DB)
+        wanted = config.DESIRED_AVG_DBFS - norm.dBFS
         boost = max(0.0, min(wanted, max_boost))
         if boost > 0:
             norm = norm + boost
@@ -101,10 +91,10 @@ async def record_and_normalize(dest: str | None = None):
 
     dest lets the caller ping-pong between two files so the NEXT segment can
     record while the current one is still being recognized. With a single shared
-    AUDIO_FILE that overlap is impossible -- the next arecord would overwrite the
+    config.AUDIO_FILE that overlap is impossible -- the next arecord would overwrite the
     clip we're mid-match on.
     """
-    path = dest or AUDIO_FILE
+    path = dest or config.AUDIO_FILE
     if not await _arecord(path):
         return None
     # pydub decode/normalize/export is synchronous CPU+disk work. Off the loop.

@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover
     get_localzone = None
 
-from ..config import DB_TIMES_ARE_UTC
+from .. import config
 
 _LOCAL_TZ = None
 
@@ -35,7 +35,7 @@ def utc_to_local_str(dt, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         return ""
     if not isinstance(dt, datetime):
         return str(dt)
-    if not DB_TIMES_ARE_UTC:
+    if not config.DB_TIMES_ARE_UTC:
         return dt.strftime(fmt)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)

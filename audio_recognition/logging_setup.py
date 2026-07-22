@@ -16,7 +16,7 @@ import os
 import sys
 from logging.handlers import TimedRotatingFileHandler
 
-from .config import LOG_FILE, LOG_LEVEL, LOG_BACKUP_DAYS, _APP_DIR
+from . import config
 from . import __version__
 
 _configured = False
@@ -138,8 +138,8 @@ def _open_file_handler(fmt):
     """Attach a daily-rotating file handler at the first writable candidate:
     the configured path (default /var/log/musicguru.log), then next to the app,
     then the user state dir. Returns (handler, path, error)."""
-    candidates = [LOG_FILE,
-                  os.path.join(_APP_DIR, "musicguru.log"),
+    candidates = [config.LOG_FILE,
+                  os.path.join(config._APP_DIR, "musicguru.log"),
                   os.path.expanduser("~/.local/state/musicguru.log")]
     last_err = None
     for path in candidates:
@@ -148,7 +148,7 @@ def _open_file_handler(fmt):
             if parent:
                 os.makedirs(parent, exist_ok=True)
             fh = TimedRotatingFileHandler(
-                path, when="D", interval=1, backupCount=LOG_BACKUP_DAYS)
+                path, when="D", interval=1, backupCount=config.LOG_BACKUP_DAYS)
             fh.setFormatter(fmt)
             return fh, path, None
         except OSError as e:
@@ -164,7 +164,7 @@ def setup_logging(level=None, banner: bool = False):
     if _configured:
         return log
 
-    level = level or getattr(logging, LOG_LEVEL, logging.INFO)
+    level = level or getattr(logging, config.LOG_LEVEL, logging.INFO)
     console_colour = _colour_enabled(sys.stderr)
 
     console = logging.StreamHandler(sys.stderr)
@@ -181,8 +181,8 @@ def setup_logging(level=None, banner: bool = False):
 
     if fh is None:
         log.warning("File logging disabled: %s", err)
-    elif path != LOG_FILE:
-        log.warning("Logging to %s (couldn't use %s)", path, LOG_FILE)
+    elif path != config.LOG_FILE:
+        log.warning("Logging to %s (couldn't use %s)", path, config.LOG_FILE)
 
     _configured = True
     if banner:
@@ -197,3 +197,18 @@ def bar(done: int, total: int, width: int = 24) -> str:
     pct = (done / total * 100) if total else 100.0
     filled = int(round(width * (done / total))) if total else width
     return f"[{'#' * filled}{'-' * (width - filled)}] {pct:3.0f}% {done}/{total}"
+
+
+def reconfigure() -> None:
+    """Re-apply logging settings after a config reload (level, file path,
+    retention, colour) without restarting the process."""
+    global _configured
+    log = logging.getLogger("audio_recognition")
+    for h in list(log.handlers):
+        try:
+            h.flush(); h.close()
+        except Exception:
+            pass
+        log.removeHandler(h)
+    _configured = False
+    setup_logging()

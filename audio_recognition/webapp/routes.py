@@ -462,6 +462,8 @@ def config_page():
         "tidal": {"configured": tidal.configured(),
                   "connected": tidal.connected() if tidal.configured() else False},
         "lastfm": {"configured": bool(config.LASTFM_API_KEY)},
+        "display": {"enabled": bool(config.DISPLAY_ENABLED),
+                    "size": f"{config.DISPLAY_SIZE[0]}x{config.DISPLAY_SIZE[1]}"},
         "autoplaylist": {"targets": autoplaylist.targets(),
                          "name": config.AUTO_PLAYLIST_NAME,
                          "enabled": autoplaylist.enabled(),
@@ -541,13 +543,17 @@ def config_save():
     if ok:
         try:
             changed = config.reload()
+            # Re-apply every subsystem that caches settings, so nothing needs a
+            # restart: service clients, logging handlers, the DB pool, and the
+            # album-art display.
             plex.reset(); spotify.reset(); tidal.reset()
-            need_restart = sorted(k for k in changed if k in config.RESTART_ONLY_KEYS)
-            if need_restart:
-                pretty = ", ".join(k.replace("AR_", "") for k in need_restart)
-                msg = f"Saved and applied. Restart still needed for: {pretty}."
-            else:
-                msg = "Saved and applied — no restart needed."
+            from .. import logging_setup
+            from ..storage import db as _db
+            from ..display import image_ops as _display
+            logging_setup.reconfigure()
+            _db.reset_pool()
+            _display.apply_display_setting()
+            msg = "Saved and applied — no restart needed."
         except Exception as e:
             log.warning("Config reload failed: %s", e)
             msg = "Saved, but live reload failed — restart to apply."
