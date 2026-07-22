@@ -528,12 +528,12 @@ def display_test():
     if not config.DISPLAY_ENABLED:
         return jsonify({"error": "The display is turned off."}), 400
     try:
-        image_ops.display_text("musicguru")
+        image_ops.display_text()   # same card the app shows while identifying
     except Exception as e:
         return jsonify({"error": f"Display failed: {e}"}), 500
     proc = getattr(image_ops, "_feh_process", None)
     if proc is not None and proc.poll() is None:
-        return jsonify({"ok": True, "detail": "Test card sent to the display."})
+        return jsonify({"ok": True, "detail": "Sent 'Identifying Track' to the display."})
     return jsonify({"ok": False,
                     "detail": "No viewer is running — see musicguru.log for why "
                               "(feh needs X; install fbi for framebuffer)."})

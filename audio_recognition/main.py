@@ -151,7 +151,7 @@ async def loop_pipeline() -> None:
                 await _finalize(time.time())
                 state.stop()
                 await asyncio.to_thread(publish.stopped)
-                await asyncio.to_thread(display_text, "Identifying Audio")
+                await asyncio.to_thread(display_text)
                 state_reset(st)
             # A failed capture (busy/misnamed device) can return fast; keep the
             # loop from spinning while the next segment records.
@@ -323,7 +323,7 @@ def main() -> int:
     if local_library.configured():
         local_library.index()   # warm the folder scan (blocking, one-time)
 
-    display_text("Identifying Audio")
+    display_text()
     try:
         asyncio.run(_run())
     finally:

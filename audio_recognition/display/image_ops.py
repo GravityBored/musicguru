@@ -62,7 +62,10 @@ def download_image_with_retries(url, retries=config.IMAGE_RETRIES, timeout=confi
     return None
 
 
-def display_text(text: str = "Identifying Audio") -> None:
+IDENTIFYING_TEXT = "Identifying Track"
+
+
+def display_text(text: str = IDENTIFYING_TEXT) -> None:
     if not config.DISPLAY_ENABLED:
         return
     img = Image.new("RGB", config.DISPLAY_SIZE, "black")
@@ -236,6 +239,6 @@ def apply_display_setting() -> None:
         if os.path.exists(config.COVER_ART_FILE):
             _ensure_viewer()       # re-show the art already on disk
         else:
-            display_text("musicguru")
+            display_text(IDENTIFYING_TEXT)
     except Exception as e:
         log.warning("display: couldn't start on enable: %s", e)
