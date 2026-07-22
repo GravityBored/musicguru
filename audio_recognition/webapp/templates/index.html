@@ -671,8 +671,77 @@
     right.className = "right";
     right.append(Object.assign(document.createElement("span"),
       { className: "plays", textContent: `${r.plays}×` }));
+    const findBtn = document.createElement("button");
+    findBtn.className = "svc fix"; findBtn.textContent = "Find in Plex";
+    findBtn.title = "Assign this to the right track in your Plex library";
+    findBtn.addEventListener("click", (e) => { e.stopPropagation(); linkToPlex(row, r); });
+    right.append(findBtn);
     row.append(right);
     return row;
+  }
+
+  // ── manual Plex assignment (for want-list mismatches) ───────────────────
+  async function linkToPlex(row, r) {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px;";
+    const box = document.createElement("div");
+    box.style.cssText = "background:var(--panel);border:1px solid var(--hairline);border-radius:6px;max-width:620px;width:100%;max-height:82vh;overflow:auto;padding:18px 20px;";
+    const inputCss = "background:var(--deep);border:1px solid var(--hairline);border-radius:2px;color:var(--ink);font-family:var(--body);font-size:14px;padding:7px 9px;";
+    box.innerHTML = `
+      <div style="font-family:var(--legend);letter-spacing:.04em;font-size:15px;margin-bottom:2px;">Find in Plex</div>
+      <div style="color:var(--ink-dim);font-size:13px;margin-bottom:12px;">${r.artist} — ${r.title}</div>
+      <div style="display:flex;gap:8px;margin-bottom:6px;">
+        <input id="plexQ" style="${inputCss}flex:1;" placeholder="Search your Plex library" />
+        <button id="plexGo" class="btn primary">Search</button>
+      </div>
+      <div id="plexList" style="font-size:14px;margin-top:8px;"></div>
+      <div style="margin-top:14px;text-align:right;"><button id="plexClose" class="btn">Close</button></div>`;
+    ov.append(box); document.body.append(ov);
+    const close = () => ov.remove();
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+    box.querySelector("#plexClose").addEventListener("click", close);
+    const q = box.querySelector("#plexQ"), list = box.querySelector("#plexList");
+    q.value = `${r.artist} ${r.title}`;
+
+    async function run() {
+      list.textContent = "Searching Plex…";
+      let js;
+      try { js = await (await get(`/api/plex/search?q=${encodeURIComponent(q.value.trim())}`)).json(); }
+      catch { list.textContent = "Search failed."; return; }
+      const hits = js.tracks || [];
+      list.innerHTML = "";
+      if (js.error) { list.textContent = js.error; return; }
+      if (!hits.length) {
+        list.innerHTML = `<div style="color:var(--ink-dim);">Nothing matched. Try just the song title, or the album name.</div>`;
+        return;
+      }
+      hits.forEach((t) => {
+        const item = document.createElement("div");
+        item.style.cssText = "padding:8px 6px;border-bottom:1px solid var(--hairline);cursor:pointer;";
+        item.innerHTML = `<div style="color:var(--ink);">${t.title}</div>
+          <div style="color:var(--ink-dim);font-size:12px;">${t.artist}${t.album ? " · " + t.album : ""}</div>`;
+        item.addEventListener("mouseenter", () => item.style.background = "var(--deep)");
+        item.addEventListener("mouseleave", () => item.style.background = "");
+        item.addEventListener("click", async () => {
+          try {
+            const res = await fetch(authed("/api/plex/link"), {
+              method: "POST", headers: hdrs({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ artist: r.artist, title: r.title,
+                                     rating_key: t.rating_key,
+                                     label: `${t.artist} - ${t.title}` }),
+            });
+            if (!res.ok) { flash("Couldn't save the assignment."); return; }
+            flash(`Linked to "${t.artist} - ${t.title}" in Plex.`);
+            row.remove();          // no longer missing
+            close();
+          } catch { flash("Couldn't save the assignment."); }
+        });
+        list.append(item);
+      });
+    }
+    box.querySelector("#plexGo").addEventListener("click", run);
+    q.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+    run();
   }
 
   async function loadWantlist(refresh) {

@@ -225,6 +225,32 @@ def _match(artist: str, title: str, album: str = None) -> dict | None:
         _cache[ck] = None
         return None
 
+    # A manual assignment wins over any search heuristics.
+    try:
+        from ..storage.db import get_library_link
+        link = get_library_link(artist, title)
+    except Exception:
+        link = None
+    if link and link.get("item_key"):
+        try:
+            tr = _srv.fetchItem(int(link["item_key"]))
+            part = None
+            try:
+                part = tr.media[0].parts[0].key
+            except (AttributeError, IndexError):
+                pass
+            res = {"rating_key": str(getattr(tr, "ratingKey", link["item_key"])),
+                   "part_key": part,
+                   "duration": int(getattr(tr, "duration", 0) / 1000) or None,
+                   "title": getattr(tr, "title", None),
+                   "artist": getattr(tr, "grandparentTitle", None)}
+            _cache[ck] = res
+            return res
+        except Exception as e:
+            if _is_conn_error(e):
+                raise PlexUnavailable(str(e))
+            log.warning("Plex link %s no longer resolves: %s", link["item_key"], e)
+
     best, best_score = None, -(10 ** 6)
     candidates = _search(section, title, artist)   # PlexUnavailable propagates
 
@@ -304,6 +330,40 @@ def match_rating_key(artist: str, title: str, album: str = None) -> str | None:
     playlist even if the search result didn't carry its media parts."""
     m = _match(artist, title, album)
     return m.get("rating_key") if m else None
+
+
+def search_candidates(query: str, limit: int = 25) -> list:
+    """Free-text track search for the manual 'find it in Plex' picker."""
+    _srv, section = connect()
+    if section is None:
+        raise PlexUnavailable("not connected")
+    q = (query or "").strip()
+    if not q:
+        return []
+    hits = []
+    try:
+        hits = section.searchTracks(title=q, maxresults=limit) or []
+    except Exception as e:
+        if _is_conn_error(e):
+            raise PlexUnavailable(str(e))
+        log.debug("Plex candidate search failed: %s", e)
+    if not hits:
+        try:
+            for art in section.searchArtists(title=q, maxresults=2):
+                hits.extend(art.tracks() or [])
+        except Exception as e:
+            if _is_conn_error(e):
+                raise PlexUnavailable(str(e))
+    out = []
+    for tr in hits[:limit]:
+        rk = getattr(tr, "ratingKey", None)
+        if rk is None:
+            continue
+        out.append({"rating_key": str(rk),
+                    "title": getattr(tr, "title", "") or "",
+                    "artist": getattr(tr, "grandparentTitle", "") or "",
+                    "album": getattr(tr, "parentTitle", "") or ""})
+    return out
 
 
 def clear_match_cache() -> int:

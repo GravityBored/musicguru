@@ -523,6 +523,36 @@ def autoplaylist_backfill():
     return jsonify({"queued": queued})
 
 
+@bp.route("/api/plex/search")
+def plex_search():
+    """Candidate Plex tracks for the manual want-list assignment picker."""
+    q = request.args.get("q", "").strip()
+    try:
+        return jsonify({"tracks": plex.search_candidates(q)})
+    except Exception as e:
+        return jsonify({"tracks": [], "error": f"Plex search failed: {e}"}), 502
+
+
+@bp.route("/api/plex/link", methods=["POST"])
+def plex_link():
+    """Assign a recognized track to a specific Plex item (or clear it)."""
+    p = request.get_json(silent=True) or {}
+    artist = (p.get("artist") or "").strip()
+    title = (p.get("title") or "").strip()
+    if not (artist and title):
+        return jsonify({"error": "artist and title are required"}), 400
+    key = (p.get("rating_key") or "").strip()
+    if not key:
+        store.clear_library_link(artist, title)
+    else:
+        store.set_library_link(artist, title, key, p.get("label"))
+    try:
+        plex.clear_match_cache()
+    except Exception:
+        pass
+    return jsonify({"ok": True, "linked": bool(key)})
+
+
 @bp.route("/api/display_test", methods=["POST"])
 def display_test():
     """Draw a test card so you can confirm the screen works without waiting for

@@ -328,6 +328,16 @@ def ensure_schema() -> None:
                 " PRIMARY KEY (artist, title))"
             )
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS library_links ("
+                " artist VARCHAR(255) NOT NULL,"
+                " title VARCHAR(255) NOT NULL,"
+                " backend VARCHAR(16) NOT NULL DEFAULT 'plex',"
+                " item_key VARCHAR(255) NOT NULL,"
+                " item_label VARCHAR(512),"
+                " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " PRIMARY KEY (artist, title, backend))"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS auto_playlist_queue ("
                 " service VARCHAR(16) NOT NULL,"
                 " match_key VARCHAR(512) NOT NULL,"
@@ -460,6 +470,45 @@ def distinct_tracks_for_backfill(cap: int = 5000) -> list[dict]:
     except mysql.connector.Error as e:
         log.warning("distinct_tracks_for_backfill failed: %s", e)
         return []
+
+
+def get_library_link(artist: str, title: str, backend: str = "plex"):
+    """A manually assigned library item for a recognized track, or None."""
+    try:
+        with _cursor(dictionary=True) as (_c, cur):
+            cur.execute(
+                "SELECT item_key, item_label FROM library_links "
+                "WHERE artist=%s AND title=%s AND backend=%s",
+                (artist[:255], title[:255], backend))
+            return cur.fetchone()
+    except mysql.connector.Error as e:
+        log.warning("get_library_link failed: %s", e)
+        return None
+
+
+def set_library_link(artist: str, title: str, item_key: str,
+                     item_label: str = None, backend: str = "plex") -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute(
+                "INSERT INTO library_links (artist, title, backend, item_key, item_label) "
+                "VALUES (%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE "
+                "item_key=VALUES(item_key), item_label=VALUES(item_label)",
+                (artist[:255], title[:255], backend, str(item_key)[:255],
+                 (item_label or "")[:512]))
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("set_library_link failed: %s", e)
+
+
+def clear_library_link(artist: str, title: str, backend: str = "plex") -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute("DELETE FROM library_links WHERE artist=%s AND title=%s AND backend=%s",
+                        (artist[:255], title[:255], backend))
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("clear_library_link failed: %s", e)
 
 
 def set_album_override(artist: str, title: str, album: str, cover_url: str = None) -> int:
