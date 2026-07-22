@@ -235,10 +235,10 @@ def apply_display_setting() -> None:
         return
     try:
         global _last_hash
-        _last_hash = None          # force the next cover to redraw at the new size
-        if os.path.exists(config.COVER_ART_FILE):
-            _ensure_viewer()       # re-show the art already on disk
-        else:
-            display_text(IDENTIFYING_TEXT)
+        # Show the waiting card straight away. Re-showing whatever art happened to
+        # be left on disk would be misleading -- that track isn't playing now.
+        # The next recognized track replaces this.
+        _last_hash = None
+        display_text(IDENTIFYING_TEXT)
     except Exception as e:
         log.warning("display: couldn't start on enable: %s", e)
