@@ -132,3 +132,5 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_DISPLAY_FB=/dev/fb0
 # AR_DISPLAY_SCALE=0     # 1 = let the viewer stretch the image to fill the panel
 # AR_DISPLAY_ART_PERCENT=100  # how much of the screen the artwork fills (10-100)
+# AR_WANTLIST_SCAN_CAP=5000  # how many distinct tracks to check against the library
+# AR_WANTLIST_MAX=1000       # how many want-list rows to return

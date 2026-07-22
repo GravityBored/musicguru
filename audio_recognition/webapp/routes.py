@@ -303,7 +303,7 @@ def wantlist():
             plex.clear_match_cache()
         except Exception:
             pass
-    rows = store.get_distinct_tracks(cap=600)
+    rows = store.get_distinct_tracks(cap=config.WANTLIST_SCAN_CAP)
     present = library.presence_batch([(r["artist"], r["title"]) for r in rows])
     # Only CONFIRMED misses belong here. A None means the library couldn't be
     # checked (Plex unreachable) -- listing those as "not in Plex" is a lie.
@@ -311,7 +311,8 @@ def wantlist():
            if present.get((r["artist"], r["title"]), None) is False]
     unknown = sum(1 for r in rows
                   if present.get((r["artist"], r["title"]), None) is None)
-    return jsonify({"configured": True, "tracks": out[:200], "unknown": unknown})
+    return jsonify({"configured": True, "tracks": out[:config.WANTLIST_MAX],
+                    "unknown": unknown, "total": len(out)})
 
 
 # --- correction ----------------------------------------------------------
@@ -541,7 +542,10 @@ def plex_browse():
             return jsonify({"tracks": plex.browse_tracks(request.args["album"])})
         if request.args.get("artist_key"):
             return jsonify({"albums": plex.browse_albums(request.args["artist_key"])})
-        return jsonify({"artists": plex.browse_artists(request.args.get("q", ""))})
+        q = request.args.get("q", "")
+        # Return artist AND album matches -- people search either way.
+        return jsonify({"artists": plex.browse_artists(q),
+                        "albums_by_name": plex.search_albums(q)})
     except Exception as e:
         return jsonify({"error": f"Plex browse failed: {e}"}), 502
 

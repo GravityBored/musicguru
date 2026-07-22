@@ -694,7 +694,7 @@
       <div style="color:var(--ink-dim);font-size:13px;margin-bottom:10px;">${r.artist} — ${r.title}</div>
       <div id="plexCrumb" style="color:var(--ink-faint);font-size:12px;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;margin-bottom:6px;">
-        <input id="plexQ" style="${inputCss}flex:1;" placeholder="Artist name" />
+        <input id="plexQ" style="${inputCss}flex:1;" placeholder="Artist or album name" />
         <button id="plexGo" class="btn primary">Search</button>
       </div>
       <div id="plexList" style="font-size:14px;margin-top:8px;"></div>
@@ -705,7 +705,7 @@
     box.querySelector("#plexClose").addEventListener("click", close);
     const q = box.querySelector("#plexQ"), list = box.querySelector("#plexList"),
           crumb = box.querySelector("#plexCrumb");
-    q.value = r.artist;   // artist only -- that's what the first step matches on
+    q.value = r.artist;   // artist or album name both work
 
     function rows(items, render, onPick) {
       list.innerHTML = "";
@@ -731,15 +731,42 @@
 
     async function showArtists() {
       crumb.textContent = "";
-      list.textContent = "Searching artists…";
+      list.textContent = "Searching…";
       const j = await api("q=" + encodeURIComponent(q.value.trim()));
       if (j.error) { list.textContent = j.error; return; }
-      rows(j.artists || [], (a) => `<div style="color:var(--ink);">${a.name}</div>`,
-           (a) => showAlbums(a));
+      const artists = j.artists || [], albums = j.albums_by_name || [];
+      if (!artists.length && !albums.length) {
+        list.innerHTML = '<div style="color:var(--ink-dim);">No artist or album matched. ' +
+          'Try just the artist name, or the album name on its own.</div>';
+        return;
+      }
+      list.innerHTML = "";
+      // Artists first, then any albums whose NAME matches (so "The Wall" works).
+      const items = artists.map((a) => ({ kind: "artist", a }))
+        .concat(albums.map((al) => ({ kind: "album", al })));
+      items.forEach((it) => {
+        const el = document.createElement("div");
+        el.style.cssText = "padding:8px 6px;border-bottom:1px solid var(--hairline);cursor:pointer;";
+        if (it.kind === "artist") {
+          el.innerHTML = `<div style="color:var(--ink);">${it.a.name}</div>` +
+            `<div style="color:var(--ink-dim);font-size:12px;">artist</div>`;
+        } else {
+          el.innerHTML = `<div style="color:var(--ink);">${it.al.title}</div>` +
+            `<div style="color:var(--ink-dim);font-size:12px;">album` +
+            `${it.al.artist ? " · " + it.al.artist : ""}${it.al.year ? " · " + it.al.year : ""}</div>`;
+        }
+        el.addEventListener("mouseenter", () => el.style.background = "var(--deep)");
+        el.addEventListener("mouseleave", () => el.style.background = "");
+        el.addEventListener("click", () => {
+          if (it.kind === "artist") showAlbums(it.a);
+          else showTracks({ name: it.al.artist || "album", key: null }, it.al);
+        });
+        list.append(el);
+      });
     }
 
     async function showAlbums(artist) {
-      crumb.innerHTML = `<a href="#" id="bkArt" style="color:var(--accent);">← artists</a> · <b>${artist.name}</b>`;
+      crumb.innerHTML = `<a href="#" id="bkArt" style="color:var(--accent);">← search</a> · <b>${artist.name}</b>`;
       crumb.querySelector("#bkArt").addEventListener("click", (e) => { e.preventDefault(); showArtists(); });
       list.textContent = "Loading albums…";
       const j = await api("artist_key=" + encodeURIComponent(artist.key));
@@ -751,10 +778,12 @@
     }
 
     async function showTracks(artist, album) {
-      crumb.innerHTML = `<a href="#" id="bkArt" style="color:var(--accent);">← artists</a> · ` +
-                        `<a href="#" id="bkAlb" style="color:var(--accent);">${artist.name}</a> · <b>${album.title}</b>`;
+      crumb.innerHTML = `<a href="#" id="bkArt" style="color:var(--accent);">← search</a> · ` +
+        (artist.key ? `<a href="#" id="bkAlb" style="color:var(--accent);">${artist.name}</a> · ` : "") +
+        `<b>${album.title}</b>`;
       crumb.querySelector("#bkArt").addEventListener("click", (e) => { e.preventDefault(); showArtists(); });
-      crumb.querySelector("#bkAlb").addEventListener("click", (e) => { e.preventDefault(); showAlbums(artist); });
+      const bkAlb = crumb.querySelector("#bkAlb");
+      if (bkAlb) bkAlb.addEventListener("click", (e) => { e.preventDefault(); showAlbums(artist); });
       list.textContent = "Loading tracks…";
       const j = await api("album=" + encodeURIComponent(album.key));
       if (j.error) { list.textContent = j.error; return; }

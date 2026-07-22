@@ -332,7 +332,7 @@ def match_rating_key(artist: str, title: str, album: str = None) -> str | None:
     return m.get("rating_key") if m else None
 
 
-def browse_artists(query: str, limit: int = 20) -> list:
+def browse_artists(query: str, limit: int = 50) -> list:
     """Artists whose name matches -- step 1 of the manual picker."""
     _srv, section = connect()
     if section is None:
@@ -352,7 +352,34 @@ def browse_artists(query: str, limit: int = 20) -> list:
             if getattr(a, "ratingKey", None) is not None]
 
 
-def browse_albums(artist_key: str, limit: int = 100) -> list:
+def search_albums(query: str, limit: int = 50) -> list:
+    """Albums matching a name, so you can jump straight to 'The Wall' instead of
+    drilling through the artist."""
+    _srv, section = connect()
+    if section is None:
+        raise PlexUnavailable("not connected")
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        albums = section.searchAlbums(title=q, maxresults=limit) or []
+    except Exception as e:
+        if _is_conn_error(e):
+            raise PlexUnavailable(str(e))
+        log.debug("Plex album search failed: %s", e)
+        return []
+    out = []
+    for al in albums:
+        if getattr(al, "ratingKey", None) is None:
+            continue
+        out.append({"key": str(al.ratingKey),
+                    "title": getattr(al, "title", "") or "",
+                    "artist": getattr(al, "parentTitle", "") or "",
+                    "year": str(getattr(al, "year", "") or "")})
+    return out
+
+
+def browse_albums(artist_key: str, limit: int = 500) -> list:
     """Albums for an artist -- step 2."""
     srv, _section = connect()
     if srv is None:
@@ -375,7 +402,7 @@ def browse_albums(artist_key: str, limit: int = 100) -> list:
     return out
 
 
-def browse_tracks(album_key: str, limit: int = 200) -> list:
+def browse_tracks(album_key: str, limit: int = 500) -> list:
     """Tracks on an album -- step 3."""
     srv, _section = connect()
     if srv is None:

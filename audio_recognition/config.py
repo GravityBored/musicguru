@@ -287,6 +287,8 @@ FLASK_HOST = os.getenv("AR_FLASK_HOST", "127.0.0.1")
 FLASK_PORT = _env_int("AR_FLASK_PORT", 8000)
 FLASK_DEBUG = _env_bool("AR_FLASK_DEBUG", False)
 WEB_TOKEN = os.getenv("AR_WEB_TOKEN")  # optional shared secret for API/machine access
+WANTLIST_SCAN_CAP = _env_int("AR_WANTLIST_SCAN_CAP", 5000)
+WANTLIST_MAX = _env_int("AR_WANTLIST_MAX", 1000)
 ARCHIVE_MAX_LIMIT = _env_int("AR_ARCHIVE_MAX_LIMIT", 100)
 
 # --- web login (optional) ------------------------------------------------
