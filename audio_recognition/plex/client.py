@@ -24,10 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from ..config import (
-    PLEX_BASE_URL, PLEX_CONCURRENCY, PLEX_MUSIC_SECTION, PLEX_TIMEOUT, PLEX_TOKEN,
-    PLEX_VERIFY_SSL,
-)
+from .. import config
 
 log = logging.getLogger("audio_recognition.plex")
 
@@ -37,14 +34,24 @@ _section = None
 _connect_tried = False
 
 
+def reset() -> None:
+    """Drop the cached connection and match cache so a credential change (after a
+    config reload) reconnects with the new base URL/token."""
+    global _server, _section, _connect_tried
+    _server = None
+    _section = None
+    _connect_tried = False
+    _cache.clear()
+
+
 def configured() -> bool:
-    return bool(PLEX_BASE_URL and PLEX_TOKEN)
+    return bool(config.PLEX_BASE_URL and config.PLEX_TOKEN)
 
 
 def _base_url() -> str:
     """Tolerate a scheme-less base URL like '192.168.1.205:32400' by assuming
     http:// (requests needs a scheme or it errors with 'No connection adapters')."""
-    u = (PLEX_BASE_URL or "").strip()
+    u = (config.PLEX_BASE_URL or "").strip()
     if u and not re.match(r"^https?://", u, re.I):
         u = "http://" + u
     return u
@@ -55,7 +62,7 @@ from ..textmatch import norm as _norm, query_title as _query_title, titles_match
 
 def _session() -> requests.Session:
     s = requests.Session()
-    if not PLEX_VERIFY_SSL:
+    if not config.PLEX_VERIFY_SSL:
         s.verify = False
         try:
             import urllib3
@@ -76,19 +83,19 @@ def connect():
         return None, None
     try:
         from plexapi.server import PlexServer
-        _server = PlexServer(_base_url(), PLEX_TOKEN, session=_session(),
-                             timeout=int(PLEX_TIMEOUT))
+        _server = PlexServer(_base_url(), config.PLEX_TOKEN, session=_session(),
+                             timeout=int(config.PLEX_TIMEOUT))
     except Exception as e:
         log.warning("Plex connect failed (%s): %s", _base_url(), e)
         _server = None
         return None, None
     try:
         sections = [s for s in _server.library.sections() if s.TYPE == "artist"]
-        if PLEX_MUSIC_SECTION:
-            _section = next((s for s in sections if s.title == PLEX_MUSIC_SECTION), None)
+        if config.PLEX_MUSIC_SECTION:
+            _section = next((s for s in sections if s.title == config.PLEX_MUSIC_SECTION), None)
             if _section is None:
                 log.warning("Plex music section %r not found; have: %s",
-                            PLEX_MUSIC_SECTION, [s.title for s in sections])
+                            config.PLEX_MUSIC_SECTION, [s.title for s in sections])
         if _section is None:
             _section = sections[0] if sections else None
     except Exception as e:
@@ -208,7 +215,7 @@ def presence_batch(pairs: list) -> dict:
     if not configured() or not pairs:
         return {p: False for p in pairs}
     connect()  # establish the shared connection once before fanning out
-    workers = max(1, min(PLEX_CONCURRENCY, len(pairs)))
+    workers = max(1, min(config.PLEX_CONCURRENCY, len(pairs)))
 
     def _one(p):
         return p, (_match(p[0], p[1]) is not None)
@@ -223,13 +230,13 @@ def presence_batch(pairs: list) -> dict:
 def open_stream(part_key: str, range_header: str | None = None) -> requests.Response:
     """Streaming GET of a Plex part, honoring the client's Range header. The
     token stays server-side."""
-    headers = {"X-Plex-Token": PLEX_TOKEN}
+    headers = {"X-Plex-Token": config.PLEX_TOKEN}
     if range_header:
         headers["Range"] = range_header
     sep = "&" if "?" in part_key else "?"
     return _session().get(
-        f"{_base_url()}{part_key}{sep}X-Plex-Token={PLEX_TOKEN}",
-        headers=headers, stream=True, timeout=PLEX_TIMEOUT,
+        f"{_base_url()}{part_key}{sep}X-Plex-Token={config.PLEX_TOKEN}",
+        headers=headers, stream=True, timeout=config.PLEX_TIMEOUT,
     )
 
 
@@ -292,7 +299,7 @@ if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.DEBUG)
     print(f"configured: {configured()}  base_url: {_base_url()!r}  "
-          f"verify_ssl: {PLEX_VERIFY_SSL}")
+          f"verify_ssl: {config.PLEX_VERIFY_SSL}")
     srv, sec = connect()
     if srv is None:
         print("=> could NOT connect to Plex. Check AR_PLEX_BASE_URL / AR_PLEX_TOKEN "

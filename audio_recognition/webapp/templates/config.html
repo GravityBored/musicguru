@@ -53,7 +53,7 @@
 
   {% if editable %}
   <h2>Edit configuration</h2>
-  <p class="sub">Writes to <code>{{ env_file }}</code> — this app's own config file. Secrets are write-only (blank keeps the current value). <strong>Most changes take effect after a restart; the login username/password apply immediately.</strong></p>
+  <p class="sub">Writes to <code>{{ env_file }}</code> — this app's own config file. Secrets are write-only (blank keeps the current value). <strong>Changes apply immediately on save — no restart needed, except capture hardware (device, channels, sample rate), the log file, and the database connection, which are set up at startup.</strong></p>
   <p class="sub">Using line-in instead of a mic? Set <strong>Capture device</strong> to your line-in (find it below), and <strong>Channels</strong> to 2 if it's stereo. <button type="button" class="btn" id="devBtn">List capture devices</button></p>
   <pre id="devBox" hidden></pre>
   {% if not auth_on %}

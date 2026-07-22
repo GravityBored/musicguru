@@ -18,7 +18,7 @@ import os
 import re
 import unicodedata
 
-from ..config import TIDAL_ENABLED, TIDAL_TOKEN_CACHE
+from .. import config
 
 log = logging.getLogger("audio_recognition.tidal")
 
@@ -41,7 +41,7 @@ from ..textmatch import norm as _norm, query_title as _clean, titles_match
 
 
 def _save(session) -> None:
-    d = os.path.dirname(TIDAL_TOKEN_CACHE)
+    d = os.path.dirname(config.TIDAL_TOKEN_CACHE)
     if d:
         os.makedirs(d, exist_ok=True)
     exp = session.expiry_time
@@ -52,7 +52,7 @@ def _save(session) -> None:
         "expiry_time": exp.isoformat() if isinstance(exp, datetime.datetime) else None,
         "is_pkce": bool(getattr(session, "is_pkce", False)),
     }
-    with open(TIDAL_TOKEN_CACHE, "w") as f:
+    with open(config.TIDAL_TOKEN_CACHE, "w") as f:
         json.dump(data, f)
 
 
@@ -63,11 +63,11 @@ def _load_session():
     global _session
     if _session is not None:
         return _session
-    if not configured() or not os.path.exists(TIDAL_TOKEN_CACHE):
+    if not configured() or not os.path.exists(config.TIDAL_TOKEN_CACHE):
         return None
     try:
         import tidalapi
-        with open(TIDAL_TOKEN_CACHE) as f:
+        with open(config.TIDAL_TOKEN_CACHE) as f:
             data = json.load(f)
         exp = data.get("expiry_time")
         exp = datetime.datetime.fromisoformat(exp) if exp else None
@@ -310,3 +310,12 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3:
         s = _load_session()
         print(f"search {sys.argv[1]!r} - {sys.argv[2]!r} -> id {search_id(s, sys.argv[1], sys.argv[2])}")
+
+
+def reset() -> None:
+    """Drop the cached session and playlist caches so a token/path change (after a
+    config reload) is picked up on the next call."""
+    global _session
+    _session = None
+    _pl_cache.clear()
+    _pl_tracks.clear()

@@ -16,10 +16,7 @@ from . import envedit
 from ..services import spotify
 from ..services import tidal
 from ..services import local_library
-from ..config import (
-    ARCHIVE_MAX_LIMIT, LASTFM_API_KEY, LASTFM_TIMEOUT, PLAYLIST_EMBED_TOKEN,
-    PLEX_BASE_URL, PLEX_TOKEN,
-)
+
 from ..plex import client as plex
 from ..storage import db as store
 
@@ -70,7 +67,7 @@ def now_playing():
 def archive_data():
     return jsonify(store.get_archive(
         offset=_int_arg("offset", 0, 0, 1_000_000),
-        limit=_int_arg("limit", 25, 1, ARCHIVE_MAX_LIMIT),
+        limit=_int_arg("limit", 25, 1, config.ARCHIVE_MAX_LIMIT),
         sort=_str_arg("sort") or "recent",
         merge_variants=request.args.get("merge") == "1",
         **_common_filters(),
@@ -81,7 +78,7 @@ def archive_data():
 def history():
     return jsonify(store.get_history(
         offset=_int_arg("offset", 0, 0, 1_000_000),
-        limit=_int_arg("limit", 50, 1, ARCHIVE_MAX_LIMIT),
+        limit=_int_arg("limit", 50, 1, config.ARCHIVE_MAX_LIMIT),
         **_common_filters(),
     ))
 
@@ -157,8 +154,8 @@ def download_playlist():
         lines.append(f"#EXTINF:{int(duration)},{t['artist']} - {t['title']}")
         if r["backend"] == "local":
             lines.append(r["location"])                       # a real file path
-        elif PLAYLIST_EMBED_TOKEN:
-            lines.append(f"{PLEX_BASE_URL}{r['part_key']}?X-Plex-Token={PLEX_TOKEN}")
+        elif config.PLAYLIST_EMBED_TOKEN:
+            lines.append(f"{config.PLEX_BASE_URL}{r['part_key']}?X-Plex-Token={config.PLEX_TOKEN}")
         else:
             lines.append(url_for("routes.stream", track_id=t["id"], _external=True))
 
@@ -257,15 +254,15 @@ def cover_now():
 def album_trivia():
     album = (request.args.get("album") or "").strip()
     artist = (request.args.get("artist") or "").strip()
-    if not album or not artist or not LASTFM_API_KEY:
+    if not album or not artist or not config.LASTFM_API_KEY:
         return jsonify({"trivia": ""})
 
     try:
         resp = requests.get(
             "https://ws.audioscrobbler.com/2.0/",
             params={"method": "album.getInfo", "artist": artist, "album": album,
-                    "api_key": LASTFM_API_KEY, "format": "json", "autocorrect": 1},
-            timeout=LASTFM_TIMEOUT,
+                    "api_key": config.LASTFM_API_KEY, "format": "json", "autocorrect": 1},
+            timeout=config.LASTFM_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -448,7 +445,7 @@ def config_page():
                     "connected": spotify.connected() if spotify.configured() else False},
         "tidal": {"configured": tidal.configured(),
                   "connected": tidal.connected() if tidal.configured() else False},
-        "lastfm": {"configured": bool(LASTFM_API_KEY)},
+        "lastfm": {"configured": bool(config.LASTFM_API_KEY)},
         "autoplaylist": {"targets": autoplaylist.targets(),
                          "name": config.AUTO_PLAYLIST_NAME,
                          "enabled": autoplaylist.enabled(),
@@ -525,6 +522,19 @@ def config_save():
     if not envedit.available():
         abort(404)
     ok, msg = envedit.apply_form(request.form)
+    if ok:
+        try:
+            changed = config.reload()
+            plex.reset(); spotify.reset(); tidal.reset()
+            need_restart = sorted(k for k in changed if k in config.RESTART_ONLY_KEYS)
+            if need_restart:
+                pretty = ", ".join(k.replace("AR_", "") for k in need_restart)
+                msg = f"Saved and applied. Restart still needed for: {pretty}."
+            else:
+                msg = "Saved and applied — no restart needed."
+        except Exception as e:
+            log.warning("Config reload failed: %s", e)
+            msg = "Saved, but live reload failed — restart to apply."
     from urllib.parse import quote
     url = f"/config?saved={'1' if ok else '0'}&msg={quote(msg)}"
     tok = request.form.get("token") or request.args.get("token")

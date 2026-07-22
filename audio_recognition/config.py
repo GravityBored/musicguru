@@ -340,3 +340,30 @@ def validate(require_plex: bool = False, require_lastfm: bool = False) -> None:
         raise ConfigError("Missing required environment variables: " + ", ".join(missing))
     if not 0.0 < EMA_ALPHA < 1.0:
         raise ConfigError("AR_EMA_ALPHA must be strictly between 0 and 1")
+
+
+# Settings that are bound once at startup and can't be hot-applied: capture
+# hardware (the arecord loop), the log file/handler, and the DB connection pool.
+# Everything else is read live via config.X and picks up a reload immediately.
+RESTART_ONLY_KEYS = {
+    "AR_ALSA_DEVICE", "AR_CAPTURE_CHANNELS", "AR_SAMPLE_RATE", "AR_RECORD_DURATION",
+    "AR_LOG_FILE", "AR_LOG_LEVEL", "AR_LOG_BACKUP_DAYS",
+    "AR_DB_HOST", "AR_DB_PORT", "AR_DB_USER", "AR_DB_PASSWORD", "AR_DB_NAME",
+    "AR_DB_POOL_SIZE",
+}
+
+
+def reload() -> list:
+    """Re-read the config file and recompute all settings in place, so changes
+    apply without a restart. Returns the list of changed AR_* keys. Callers should
+    reset any cached clients afterward. Settings in RESTART_ONLY_KEYS are bound at
+    startup and won't take effect until the service restarts."""
+    import importlib
+    import sys as _sys
+    before = {k: v for k, v in os.environ.items() if k.startswith("AR_")}
+    _load_conf(CONFIG_PATH)
+    after_file = {k: v for k, v in os.environ.items() if k.startswith("AR_")}
+    importlib.reload(_sys.modules[__name__])
+    changed = [k for k in set(before) | set(after_file)
+               if before.get(k) != after_file.get(k)]
+    return changed
