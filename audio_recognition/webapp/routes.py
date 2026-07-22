@@ -311,7 +311,8 @@ def wantlist():
            if present.get((r["artist"], r["title"]), None) is False]
     unknown = sum(1 for r in rows
                   if present.get((r["artist"], r["title"]), None) is None)
-    return jsonify({"configured": True, "tracks": out[:config.WANTLIST_MAX],
+    shown = out[:config.WANTLIST_MAX] if config.WANTLIST_MAX else out
+    return jsonify({"configured": True, "tracks": shown,
                     "unknown": unknown, "total": len(out)})
 
 

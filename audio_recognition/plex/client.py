@@ -332,7 +332,7 @@ def match_rating_key(artist: str, title: str, album: str = None) -> str | None:
     return m.get("rating_key") if m else None
 
 
-def browse_artists(query: str, limit: int = 50) -> list:
+def browse_artists(query: str, limit: int = 0) -> list:
     """Artists whose name matches -- step 1 of the manual picker."""
     _srv, section = connect()
     if section is None:
@@ -341,7 +341,8 @@ def browse_artists(query: str, limit: int = 50) -> list:
     if not q:
         return []
     try:
-        arts = section.searchArtists(title=q, maxresults=limit) or []
+        kw = {"maxresults": limit} if limit else {}
+        arts = section.searchArtists(title=q, **kw) or []
     except Exception as e:
         if _is_conn_error(e):
             raise PlexUnavailable(str(e))
@@ -352,7 +353,7 @@ def browse_artists(query: str, limit: int = 50) -> list:
             if getattr(a, "ratingKey", None) is not None]
 
 
-def search_albums(query: str, limit: int = 50) -> list:
+def search_albums(query: str, limit: int = 0) -> list:
     """Albums matching a name, so you can jump straight to 'The Wall' instead of
     drilling through the artist."""
     _srv, section = connect()
@@ -362,7 +363,8 @@ def search_albums(query: str, limit: int = 50) -> list:
     if not q:
         return []
     try:
-        albums = section.searchAlbums(title=q, maxresults=limit) or []
+        kw = {"maxresults": limit} if limit else {}
+        albums = section.searchAlbums(title=q, **kw) or []
     except Exception as e:
         if _is_conn_error(e):
             raise PlexUnavailable(str(e))
@@ -379,7 +381,7 @@ def search_albums(query: str, limit: int = 50) -> list:
     return out
 
 
-def browse_albums(artist_key: str, limit: int = 500) -> list:
+def browse_albums(artist_key: str, limit: int = 0) -> list:
     """Albums for an artist -- step 2."""
     srv, _section = connect()
     if srv is None:
@@ -393,7 +395,7 @@ def browse_albums(artist_key: str, limit: int = 500) -> list:
         log.debug("Plex album browse failed: %s", e)
         return []
     out = []
-    for al in albums[:limit]:
+    for al in (albums[:limit] if limit else albums):
         if getattr(al, "ratingKey", None) is None:
             continue
         out.append({"key": str(al.ratingKey),
@@ -402,7 +404,7 @@ def browse_albums(artist_key: str, limit: int = 500) -> list:
     return out
 
 
-def browse_tracks(album_key: str, limit: int = 500) -> list:
+def browse_tracks(album_key: str, limit: int = 0) -> list:
     """Tracks on an album -- step 3."""
     srv, _section = connect()
     if srv is None:
@@ -416,7 +418,7 @@ def browse_tracks(album_key: str, limit: int = 500) -> list:
         log.debug("Plex track browse failed: %s", e)
         return []
     out = []
-    for tr in tracks[:limit]:
+    for tr in (tracks[:limit] if limit else tracks):
         if getattr(tr, "ratingKey", None) is None:
             continue
         out.append({"rating_key": str(tr.ratingKey),

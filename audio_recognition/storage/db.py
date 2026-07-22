@@ -458,14 +458,15 @@ def autoplaylist_queue_depth() -> int:
         return 0
 
 
-def distinct_tracks_for_backfill(cap: int = 5000) -> list[dict]:
+def distinct_tracks_for_backfill(cap: int = 0) -> list[dict]:
     """Distinct (artist, title, album) across the archive -- to seed the queue
     with everything already heard."""
     try:
         with _cursor(dictionary=True) as (_c, cur):
             cur.execute(
                 "SELECT artist, title, MAX(album) album FROM recognized_songs "
-                "GROUP BY artist, title LIMIT %s", (cap,))
+                "GROUP BY artist, title" + (" LIMIT %s" if cap else ""),
+                ((cap,) if cap else ()))
             return cur.fetchall() or []
     except mysql.connector.Error as e:
         log.warning("distinct_tracks_for_backfill failed: %s", e)
@@ -642,7 +643,7 @@ def get_metrics() -> dict:
         return {}
 
 
-def get_distinct_tracks(cap: int = 600) -> list[dict]:
+def get_distinct_tracks(cap: int = 0) -> list[dict]:
     """One representative row per (title, artist), most-played first -- the pool
     the want-list checks against Plex."""
     try:
@@ -650,8 +651,9 @@ def get_distinct_tracks(cap: int = 600) -> list[dict]:
             cur.execute(
                 "SELECT MAX(id) id, MIN(title) title, artist, MAX(cover_url) cover_url, "
                 "COUNT(*) plays FROM recognized_songs "
-                "GROUP BY title, artist ORDER BY plays DESC LIMIT %s",
-                (cap,),
+                "GROUP BY title, artist ORDER BY plays DESC"
+                + (" LIMIT %s" if cap else ""),
+                ((cap,) if cap else ()),
             )
             return cur.fetchall()
     except mysql.connector.Error as e:
