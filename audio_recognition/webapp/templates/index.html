@@ -602,6 +602,41 @@
     } catch { flash("Couldn't set the release."); }
   }
 
+  // Clipboard with fallbacks: navigator.clipboard only exists in a secure
+  // context (https or localhost), so over plain HTTP on the LAN it's undefined.
+  async function copyText(text, label) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        flash(label || "Copied to clipboard.");
+        return true;
+      }
+      throw new Error("no clipboard api");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+        document.body.appendChild(ta);
+        ta.select(); ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) { flash(label || "Copied to clipboard."); return true; }
+        throw new Error("execCommand failed");
+      } catch {
+        const blob = new Blob([text], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "musicguru-list.txt";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        flash("Clipboard unavailable over HTTP — downloaded the list instead.");
+        return false;
+      }
+    }
+  }
+
   // ── want-list (heard, not in Plex) ──────────────────────────────────────
   function svcLinks(r) {
     const acts = document.createElement("div");
@@ -640,12 +675,12 @@
     return row;
   }
 
-  async function loadWantlist() {
+  async function loadWantlist(refresh) {
     const list = $("list");
-    list.innerHTML = '<div class="msg">Checking what Plex is missing…</div>';
+    list.innerHTML = `<div class="msg">${refresh ? "Re-checking every track against Plex…" : "Checking what Plex is missing…"}</div>`;
     $("msg").hidden = true;
     let js;
-    try { js = await (await get("/api/wantlist")).json(); }
+    try { js = await (await get("/api/wantlist" + (refresh ? "?refresh=1" : ""))).json(); }
     catch { list.innerHTML = ""; flash("Couldn't load the want-list."); return; }
     if (!js.configured) { list.innerHTML = ""; flash("Connect Plex to see what you're missing."); return; }
     if (!js.tracks.length) { list.innerHTML = ""; flash("Nothing to want — Plex has everything you've heard."); return; }
@@ -654,15 +689,20 @@
     const bar = document.createElement("div");
     bar.className = "wantbar";
     bar.append(Object.assign(document.createElement("span"),
-      { textContent: `${js.tracks.length} heard but not in Plex` }));
+      { textContent: `${js.tracks.length} heard but not in Plex`
+          + (js.unknown ? ` · ${js.unknown} couldn't be checked` : "") }));
     const copy = document.createElement("button");
     copy.className = "btn"; copy.textContent = "Copy list";
     copy.addEventListener("click", () => {
       const text = js.tracks.map((t) => `${t.artist} - ${t.title}`).join("\n");
-      navigator.clipboard.writeText(text).then(() => flash("Copied to clipboard."))
-        .catch(() => flash("Copy failed."));
+      copyText(text, `Copied ${js.tracks.length} tracks (Artist - Title).`);
     });
     bar.append(copy);
+    const recheck = document.createElement("button");
+    recheck.className = "btn"; recheck.textContent = "Recheck";
+    recheck.title = "Clear cached results and re-check every track against Plex";
+    recheck.addEventListener("click", () => loadWantlist(true));
+    bar.append(recheck);
     list.append(bar);
 
     const frag = document.createDocumentFragment();
@@ -930,17 +970,7 @@
       if (!res.ok) { flash("Couldn't build the list."); return; }
       const text = await res.text();
       const n = text.trim() ? text.trim().split("\n").length : 0;
-      try {
-        await navigator.clipboard.writeText(text);
-        flash(`Copied ${n} tracks to the clipboard (Artist - Title).`);
-      } catch {
-        // clipboard blocked (non-HTTPS etc.) -> fall back to a download
-        const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-        const a = document.createElement("a");
-        a.href = url; a.download = "tracks.txt"; a.click();
-        URL.revokeObjectURL(url);
-        flash(`Exported ${n} tracks as tracks.txt.`);
-      }
+      await copyText(text, `Copied ${n} tracks (Artist - Title).`);
     } catch { flash("Couldn't build the list."); }
   });
 

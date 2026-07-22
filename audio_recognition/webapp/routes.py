@@ -298,10 +298,20 @@ def wantlist():
     an acquisition list. Checks run concurrently and are cached."""
     if not library.configured():
         return jsonify({"configured": False, "tracks": []})
+    if request.args.get("refresh"):
+        try:
+            plex.clear_match_cache()
+        except Exception:
+            pass
     rows = store.get_distinct_tracks(cap=600)
     present = library.presence_batch([(r["artist"], r["title"]) for r in rows])
-    out = [r for r in rows if not present.get((r["artist"], r["title"]), False)]
-    return jsonify({"configured": True, "tracks": out[:200]})
+    # Only CONFIRMED misses belong here. A None means the library couldn't be
+    # checked (Plex unreachable) -- listing those as "not in Plex" is a lie.
+    out = [r for r in rows
+           if present.get((r["artist"], r["title"]), None) is False]
+    unknown = sum(1 for r in rows
+                  if present.get((r["artist"], r["title"]), None) is None)
+    return jsonify({"configured": True, "tracks": out[:200], "unknown": unknown})
 
 
 # --- correction ----------------------------------------------------------

@@ -306,6 +306,14 @@ def match_rating_key(artist: str, title: str, album: str = None) -> str | None:
     return m.get("rating_key") if m else None
 
 
+def clear_match_cache() -> int:
+    """Forget cached match results so lookups re-run (e.g. after a matching
+    improvement, or to re-check the want-list). Returns entries cleared."""
+    n = len(_cache)
+    _cache.clear()
+    return n
+
+
 def presence_batch(pairs: list) -> dict:
     """Check many (artist, title) pairs at once, concurrently. Returns
     {(artist, title): bool}. Used by the want-list and the in-library badge so a
@@ -313,7 +321,7 @@ def presence_batch(pairs: list) -> dict:
     second call is instant."""
     pairs = list(pairs)
     if not configured() or not pairs:
-        return {p: False for p in pairs}
+        return {p: None for p in pairs}
     connect()  # establish the shared connection once before fanning out
     workers = max(1, min(config.PLEX_CONCURRENCY, len(pairs)))
 
@@ -321,7 +329,9 @@ def presence_batch(pairs: list) -> dict:
         try:
             return p, (_match(p[0], p[1]) is not None)
         except PlexUnavailable:
-            return p, False   # UI badge: unknown reads as "not in library"
+            # UNKNOWN, not "missing" -- claiming a track isn't in Plex because we
+            # couldn't reach Plex is what filled the want-list with owned music.
+            return p, None
 
     out: dict = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
