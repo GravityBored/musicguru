@@ -66,7 +66,10 @@
       <div class="fld">
         <label for="{{ it.key }}">{{ it.label }}</label>
         {% if it.kind == 'bool' %}
-          <input type="checkbox" id="{{ it.key }}" name="{{ it.key }}" {% if it.checked %}checked{% endif %} />
+          <input type="checkbox" id="{{ it.key }}" name="{{ it.key }}"
+                 {% if it.checked and not it.disabled %}checked{% endif %}
+                 {% if it.disabled %}disabled title="{{ it.disabled }}"{% endif %} />
+          {% if it.disabled %}<span class="opt">{{ it.disabled }}</span>{% endif %}
         {% elif it.kind == 'secret' %}
           <input type="password" id="{{ it.key }}" name="{{ it.key }}" autocomplete="new-password"
                  placeholder="{{ 'set — blank keeps current' if it.is_set else 'not set' }}" />

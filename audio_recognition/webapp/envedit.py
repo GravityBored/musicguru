@@ -102,6 +102,29 @@ def _truthy(v) -> bool:
     return str(v).strip() in ("1", "true", "True", "yes", "on")
 
 
+def _unavailable_reason(key: str):
+    """Why a field can't be used yet, or None. Keeps people from switching on an
+    auto-playlist for a service that isn't set up -- it would silently never add
+    anything."""
+    if key == "AR_AUTO_PLAYLIST_SPOTIFY":
+        from ..services import spotify
+        if not spotify.configured():
+            return "needs Spotify credentials"
+        if not spotify.connected():
+            return "connect Spotify first"
+    elif key == "AR_AUTO_PLAYLIST_TIDAL":
+        from ..services import tidal
+        if not tidal.configured():
+            return "tidalapi not installed"
+        if not tidal.connected():
+            return "connect Tidal first"
+    elif key == "AR_AUTO_PLAYLIST_PLEX":
+        from ..plex import client as plex
+        if not plex.configured():
+            return "set the Plex URL and token first"
+    return None
+
+
 def fields_for_view():
     """Schema grouped by section, with current values suitable for the browser:
     non-secrets carry their effective value; secrets carry only is_set."""
@@ -110,6 +133,10 @@ def fields_for_view():
     for key, label, kind, section in SCHEMA:
         eff = _effective(key, raw)
         item = {"key": key, "label": label, "kind": kind}
+        try:
+            item["disabled"] = _unavailable_reason(key)
+        except Exception:
+            item["disabled"] = None
         if kind == "secret":
             if key == "AR_WEB_PASSWORD":
                 item["is_set"] = bool(config.WEB_PASSWORD_HASH or config.WEB_PASSWORD)
@@ -154,11 +181,25 @@ def set_credentials(user: str, password: str) -> tuple[bool, str]:
     return True, "Saved."
 
 
+def _blocked_keys(form) -> list:
+    """Auto-playlist toggles the form tried to turn on for an unusable service."""
+    out = []
+    for key in ("AR_AUTO_PLAYLIST_SPOTIFY", "AR_AUTO_PLAYLIST_TIDAL",
+                "AR_AUTO_PLAYLIST_PLEX"):
+        if _truthy(form.get(key)) and _unavailable_reason(key):
+            out.append(key)
+    return out
+
+
 def apply_form(form) -> tuple[bool, str]:
     """Write submitted values back to musicguru.conf. `form` is the request form
     (a multidict). Returns (ok, message)."""
     if not available():
         return False, "Config editing is disabled."
+
+    # Don't let an auto-playlist be switched on for a service that can't use it
+    # (a stale page, or a hand-crafted POST) -- it would silently add nothing.
+    blocked = _blocked_keys(form)
 
     # A plaintext "New password" is hashed and applied live (username too).
     new_pw = (form.get("AR_WEB_PASSWORD") or "").strip()
@@ -171,6 +212,8 @@ def apply_form(form) -> tuple[bool, str]:
     for key in _KEYS:
         if key == "AR_WEB_PASSWORD":
             continue  # handled above (never store plaintext)
+        if key in blocked:
+            continue  # leave it off
         kind = _KINDS[key]
         if kind == "bool":
             # unchecked checkboxes are absent from the form
