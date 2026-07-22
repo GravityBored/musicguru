@@ -90,7 +90,14 @@ def enqueue(artist: str, title: str, album: str = None, plays: int = None) -> No
     key = _key(artist, title)
     ov = db.get_album_override(artist, title)
     al = ov["album"] if ov else album
+    name = config.AUTO_PLAYLIST_NAME
     for svc in svcs:
+        # Already sitting in the actual playlist on the service? Nothing to do.
+        if _in_playlist(svc, name, key):
+            continue
+        # Known to be unavailable on this service (searched before, not found)?
+        # Skip re-searching it every play. Removal-from-playlist is handled by the
+        # membership check above; this log is only about catalogue availability.
         if db.autoplaylist_seen(svc, key):
             continue
         db.autoplaylist_enqueue(svc, key, artist, title, al)
@@ -103,6 +110,55 @@ _flush_lock = threading.Lock()
 _backoff_until: dict[str, float] = {}   # service -> epoch seconds to resume
 _consec_fail: dict[str, int] = {}       # service -> consecutive-error count
 _PEAK = {"n": 0}                        # high-water queue depth, for the progress bar
+
+# Live playlist membership, read from each service and cached briefly. This is
+# the source of truth for "is the track already in the playlist" -- NOT our own
+# log. So if you delete a track from the playlist, it becomes eligible again.
+_members: dict[str, tuple] = {}         # service -> (set_of_keys, fetched_epoch)
+_MEMBER_TTL = 300                       # seconds before re-reading the playlist
+
+
+def _read_membership(svc: str, name: str) -> set:
+    if svc == "spotify":
+        return spotify.playlist_membership(name)
+    if svc == "tidal":
+        return tidal.playlist_membership(name)
+    if svc == "plex":
+        return plex.playlist_membership(name)
+    return set()
+
+
+def _membership(svc: str, name: str, force: bool = False):
+    """Cached set of artist|title keys in the service's playlist, or None if it
+    can't be read right now (service down) and we have no prior snapshot."""
+    now = time.time()
+    cached = _members.get(svc)
+    if not force and cached and now - cached[1] < _MEMBER_TTL:
+        return cached[0]
+    try:
+        keys = _read_membership(svc, name)
+    except Exception as e:
+        log.debug("Auto-playlist: couldn't read %s playlist membership: %s", svc, e)
+        return cached[0] if cached else None   # unknown
+    _members[svc] = (keys, now)
+    return keys
+
+
+def _in_playlist(svc: str, name: str, key: str) -> bool:
+    m = _membership(svc, name)
+    return bool(m) and key in m
+
+
+def _remember_member(svc: str, key: str) -> None:
+    cached = _members.get(svc)
+    if cached:
+        cached[0].add(key)
+
+
+def refresh_membership() -> None:
+    """Force a re-read of every enabled service's playlist (e.g. after the name
+    changes)."""
+    _members.clear()
 
 
 def _peak_queue(current: int) -> int:
@@ -164,18 +220,22 @@ def _drain_service(svc: str, name: str) -> tuple:
         key = row["match_key"]
         try:
             status = _add_one(svc, name, row["artist"], row["title"], row.get("album"))
-            db.autoplaylist_mark(svc, key)
             db.autoplaylist_queue_remove(svc, key)
             if status == "added":
                 added += 1
+                _remember_member(svc, key)   # now in the playlist
                 log.info("Auto-playlist: added %s - %s to %s",
                          row["artist"], row["title"], svc)
             elif status == "present":
                 present += 1
+                _remember_member(svc, key)   # already in the playlist
                 log.info("Auto-playlist: %s - %s already in %s playlist (skipping)",
                          row["artist"], row["title"], svc)
             else:
+                # Not on the service at all -> record it so we don't re-search it
+                # every play. (This is the ONLY thing the log now gates.)
                 skipped += 1
+                db.autoplaylist_mark(svc, key)
                 log.info("Auto-playlist: %s - %s not found on %s (skipping)",
                          row["artist"], row["title"], svc)
         except Exception as e:
@@ -248,11 +308,14 @@ def backfill() -> int:
         return 0
     queued = 0
     threshold = max(1, int(config.AUTO_PLAYLIST_MIN_PLAYS))
+    name = config.AUTO_PLAYLIST_NAME
     for r in db.distinct_tracks_for_backfill():
         if int(r.get("plays") or 0) < threshold:
             continue
         key = _key(r["artist"], r["title"])
         for svc in svcs:
+            if _in_playlist(svc, name, key):
+                continue
             if db.autoplaylist_seen(svc, key):
                 continue
             db.autoplaylist_enqueue(svc, key, r["artist"], r["title"], r.get("album"))

@@ -187,6 +187,52 @@ def _existing_uris(sp, pid: str) -> set:
     return uris
 
 
+def playlist_membership(name: str) -> set:
+    """The set of normalized artist|title keys currently in the named playlist,
+    read from Spotify itself. Empty set if the playlist doesn't exist yet.
+    Raises if Spotify can't be reached, so callers don't treat that as 'empty'."""
+    from ..textmatch import norm
+    sp = _client()
+    if sp is None:
+        raise RuntimeError("Spotify not connected")
+    pid = _playlist_id_if_exists(sp, name)
+    if not pid:
+        return set()
+    keys = set()
+    try:
+        res = sp.playlist_items(pid, fields="items(track(name,artists(name))),next",
+                                additional_types=["track"], limit=100)
+        while res:
+            for it in res.get("items", []):
+                t = it.get("track") or {}
+                nm = t.get("name") or ""
+                arts = t.get("artists") or []
+                a = arts[0].get("name", "") if arts else ""
+                if nm:
+                    keys.add(f"{norm(a)}|{norm(nm)}")
+            res = sp.next(res) if res.get("next") else None
+    except Exception as e:
+        log.debug("Spotify membership read failed: %s", e)
+    return keys
+
+
+def _playlist_id_if_exists(sp, name: str):
+    if name in _pl_cache:
+        return _pl_cache[name]
+    try:
+        uid = sp.me()["id"]
+        page = sp.current_user_playlists(limit=50)
+        while page:
+            for pl in page.get("items", []):
+                if pl and pl.get("name") == name and pl.get("owner", {}).get("id") == uid:
+                    _pl_cache[name] = pl["id"]
+                    return pl["id"]
+            page = sp.next(page) if page.get("next") else None
+    except Exception as e:
+        log.debug("Spotify playlist lookup failed: %s", e)
+    return None
+
+
 def add_to_named_playlist(name: str, artist: str, title: str, album: str = None) -> str:
     """Append one track to the named playlist (create it if needed). Returns
     'added', 'present' (already in the playlist), or 'absent' (not found)."""

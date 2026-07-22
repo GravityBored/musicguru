@@ -624,6 +624,7 @@ def config_save():
             logging_setup.reconfigure()
             _db.reset_pool()
             _display.apply_display_setting()
+            autoplaylist.refresh_membership()   # playlist name may have changed
             msg = "Saved and applied — no restart needed."
         except Exception as e:
             log.warning("Config reload failed: %s", e)

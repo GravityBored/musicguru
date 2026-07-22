@@ -510,6 +510,30 @@ def open_stream(part_key: str, range_header: str | None = None) -> requests.Resp
     )
 
 
+def playlist_membership(title: str) -> set:
+    """Normalized artist|title keys currently in the named Plex playlist. Empty if
+    it doesn't exist; raises PlexUnavailable if Plex can't be reached."""
+    from ..textmatch import norm
+    server, _section = connect()
+    if server is None:
+        raise PlexUnavailable("not connected")
+    keys = set()
+    try:
+        for pl in server.playlists(playlistType="audio"):
+            if (pl.title or "").strip().lower() == title.strip().lower():
+                for it in pl.items():
+                    t = getattr(it, "title", "") or ""
+                    a = getattr(it, "grandparentTitle", "") or ""
+                    if t:
+                        keys.add(f"{norm(a)}|{norm(t)}")
+                break
+    except Exception as e:
+        if _is_conn_error(e):
+            raise PlexUnavailable(str(e))
+        log.debug("Plex membership read failed: %s", e)
+    return keys
+
+
 def create_or_append_playlist(title: str, rating_keys: list) -> dict:
     """Create an audio playlist from these rating keys, or append to an existing
     one with the same title. Returns {'created': bool, 'playlist_key': str|None}."""

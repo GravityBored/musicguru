@@ -271,6 +271,54 @@ def _fresh_playlist(s, pid: str):
     return UserPlaylist(s, pid)
 
 
+def playlist_membership(name: str) -> set:
+    """Normalized artist|title keys currently in the named Tidal playlist, read
+    from Tidal. Empty if it doesn't exist; raises if Tidal can't be reached."""
+    from ..textmatch import norm
+    s = _load_session()
+    if s is None:
+        raise RuntimeError("Tidal not connected")
+    pid = _playlist_id_if_exists(s, name)
+    if not pid:
+        return set()
+    keys = set()
+    try:
+        pl = _fresh_playlist(s, pid)
+        offset = 0
+        while True:
+            batch = pl.tracks(limit=100, offset=offset)
+            if not batch:
+                break
+            for tr in batch:
+                nm = getattr(tr, "name", "") or ""
+                art = getattr(tr, "artist", None)
+                a = getattr(art, "name", "") if art is not None else ""
+                if not a:
+                    arts = getattr(tr, "artists", None) or []
+                    a = getattr(arts[0], "name", "") if arts else ""
+                if nm:
+                    keys.add(f"{norm(a)}|{norm(nm)}")
+            if len(batch) < 100:
+                break
+            offset += 100
+    except Exception as e:
+        log.debug("Tidal membership read failed: %s", e)
+    return keys
+
+
+def _playlist_id_if_exists(s, name: str):
+    if name in _pl_cache:
+        return _pl_cache[name]
+    try:
+        for pl in s.user.playlists():
+            if (getattr(pl, "name", "") or "") == name:
+                _pl_cache[name] = pl.id
+                return pl.id
+    except Exception as e:
+        log.debug("Tidal playlist lookup failed: %s", e)
+    return None
+
+
 def _existing_ids(s, pid: str) -> set:
     """Track ids already in the playlist, fetched once and cached, so we skip a
     track that's already there (added manually or on a previous run)."""
