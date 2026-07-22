@@ -97,20 +97,34 @@ def _atomic_save(canvas: Image.Image, path: str) -> None:
 
 def _viewer_commands() -> list:
     """Viewer command-lines to try, in order. AR_DISPLAY_CMD overrides (use
-    {file} for the image path). feh needs X; fbi/fbv draw straight to the
-    framebuffer on a headless Pi, so they're tried as fallbacks."""
-    custom = getattr(config, "DISPLAY_CMD", "") or ""
-    if custom.strip():
+    {file} for the image path; {w}/{h} for the configured size).
+
+    The image is already rendered at exactly AR_DISPLAY_W x AR_DISPLAY_H, so the
+    viewers are told NOT to rescale it -- otherwise feh --fullscreen / fbi -a
+    stretch it to the panel and the size setting has no visible effect. Set
+    AR_DISPLAY_SCALE=1 to let the viewer scale to fill instead.
+    """
+    w, h = config.DISPLAY_SIZE
+    custom = (getattr(config, "DISPLAY_CMD", "") or "").strip()
+    if custom:
         return [[p.replace("{file}", config.COVER_ART_FILE)
+                  .replace("{w}", str(w)).replace("{h}", str(h))
                  for p in custom.split()]]
     fb = getattr(config, "DISPLAY_FB", "/dev/fb0")
-    return [
-        ["feh", "--fullscreen", "--hide-pointer",
-         "--reload", str(config.FEH_RELOAD_SEC), config.COVER_ART_FILE],
-        ["fbi", "-d", fb, "-T", "1", "-noverbose", "-a", "-cachemem", "0",
-         config.COVER_ART_FILE],
-        ["fbv", "-d", fb, "-f", "-r", config.COVER_ART_FILE],
-    ]
+    scale = bool(getattr(config, "DISPLAY_SCALE", False))
+    if scale:
+        feh = ["feh", "--fullscreen", "--hide-pointer",
+               "--reload", str(config.FEH_RELOAD_SEC), config.COVER_ART_FILE]
+        fbi = ["fbi", "-d", fb, "-T", "1", "-noverbose", "-a",
+               "-cachemem", "0", config.COVER_ART_FILE]
+    else:
+        # Render 1:1 at the configured size, centred on the panel.
+        feh = ["feh", "--fullscreen", "--no-scale", "--hide-pointer",
+               "--geometry", f"{w}x{h}",
+               "--reload", str(config.FEH_RELOAD_SEC), config.COVER_ART_FILE]
+        fbi = ["fbi", "-d", fb, "-T", "1", "-noverbose",
+               "-cachemem", "0", config.COVER_ART_FILE]
+    return [feh, fbi, ["fbv", "-d", fb, "-f", "-r", config.COVER_ART_FILE]]
 
 
 def _ensure_viewer() -> None:
@@ -141,7 +155,9 @@ def _ensure_viewer() -> None:
         time.sleep(0.6)
         if proc.poll() is None:
             _feh_process = proc
-            log.info("display: started %s (pid %s)", cmd[0], proc.pid)
+            log.info("display: started %s (pid %s) at %dx%d%s", cmd[0], proc.pid,
+                     config.DISPLAY_SIZE[0], config.DISPLAY_SIZE[1],
+                     " (viewer scaling on)" if getattr(config, "DISPLAY_SCALE", False) else "")
             return
         err = ""
         try:

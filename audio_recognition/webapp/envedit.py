@@ -26,6 +26,7 @@ SCHEMA = [
     ("AR_DISPLAY_H", "Display height (px)", "int", "Display"),
     ("AR_DISPLAY_CMD", "Viewer command (blank = auto)", "text", "Display"),
     ("AR_DISPLAY_FB", "Framebuffer device", "text", "Display"),
+    ("AR_DISPLAY_SCALE", "Let the viewer stretch to fill the screen", "bool", "Display"),
 
     ("AR_ALSA_DEVICE", "Capture device (arecord -D)", "text", "Capture"),
     ("AR_CAPTURE_CHANNELS", "Channels (1 mic, 2 line-in)", "int", "Capture"),

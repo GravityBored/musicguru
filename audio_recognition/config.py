@@ -136,6 +136,9 @@ DISPLAY_SIZE = (_env_int("AR_DISPLAY_W", 800), _env_int("AR_DISPLAY_H", 480))
 # Override with your own command; {file} is replaced with the image path.
 DISPLAY_CMD = os.getenv("AR_DISPLAY_CMD", "")
 DISPLAY_FB = os.getenv("AR_DISPLAY_FB", "/dev/fb0")
+# Off: the image is drawn at exactly DISPLAY_SIZE and shown 1:1 (centred).
+# On: let the viewer stretch it to fill the physical panel.
+DISPLAY_SCALE = _env_bool("AR_DISPLAY_SCALE", False)
 FONT_PATH = os.getenv(
     "AR_FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 )
