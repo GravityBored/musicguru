@@ -156,7 +156,7 @@
     {% if status.autoplaylist.targets %}<span class="badge ok">on</span>{% elif status.autoplaylist.enabled %}<span class="badge warn">waiting</span>{% else %}<span class="badge off">off</span>{% endif %}
     <span class="grow"></span>
     <span class="opt">{% if status.autoplaylist.enabled %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') or 'connect a service' }}{% if status.autoplaylist.min_plays > 1 %} · after {{ status.autoplaylist.min_plays }} plays{% endif %}{% if status.autoplaylist.queued %} · {{ status.autoplaylist.queued }} queued{% endif %}{% else %}enable per service below{% endif %}</span>
-    {% if status.autoplaylist.enabled %}<button type="button" class="btn" id="apBackfill">Sync all heard</button>{% endif %}
+    {% if status.autoplaylist.enabled %}<button type="button" class="btn" id="apBackfill" style="margin-left:10px;">Sync all heard</button>{% endif %}
   </div>
 
   {% if not status.spotify.configured %}
@@ -241,8 +241,19 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
         fetch(authed("/api/autoplaylist/backfill"), { method: "POST" })
           .then(function (r) { return r.json(); })
           .then(function (j) {
-            apBtn.textContent = j.error ? "Sync all heard" : ("Queued " + j.queued);
-            apBtn.disabled = !!j.error;
+            apBtn.disabled = false;
+            if (j.error) { apBtn.textContent = "Sync all heard"; alert(j.error); return; }
+            apBtn.textContent = "Queued " + j.queued;
+            if (!j.queued) {
+              // Explain WHY nothing was queued instead of a bare "Queued 0".
+              var bits = [];
+              if (j.below_threshold) bits.push(j.below_threshold + " under " + j.min_plays + " plays");
+              if (j.already_in_playlist) bits.push(j.already_in_playlist + " already in the playlist");
+              if (j.not_on_service) bits.push(j.not_on_service + " not on the service");
+              alert("Nothing to queue" + (bits.length ? " — " + bits.join(", ") + "." : ".")
+                    + (j.considered ? " (" + j.considered + " distinct tracks checked)" : ""));
+            }
+            setTimeout(function () { apBtn.textContent = "Sync all heard"; }, 6000);
           })
           .catch(function () { apBtn.textContent = "Sync all heard"; apBtn.disabled = false; });
       });

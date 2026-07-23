@@ -523,7 +523,8 @@ def autoplaylist_backfill():
     if not autoplaylist.enabled():
         return jsonify({"error": "No auto-playlist services are enabled."}), 400
     queued = autoplaylist.backfill()
-    return jsonify({"queued": queued})
+    stats = autoplaylist.last_backfill_stats()
+    return jsonify({"queued": queued, **stats})
 
 
 @bp.route("/api/plex/search")

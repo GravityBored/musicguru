@@ -317,6 +317,27 @@ def ensure_schema() -> None:
                 " added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
                 " PRIMARY KEY (service, match_key))"
             )
+            # Migration: this table used to record EVERY handled track (added,
+            # already-present and absent). Since the live playlist became the
+            # source of truth it means only "this track isn't on the service".
+            # Legacy rows would wrongly block re-queueing everything, so purge
+            # them once. The `kind` column is the marker that it's been done.
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = 'auto_playlist_log' "
+                "AND column_name = 'kind'"
+            )
+            row = cur.fetchone()
+            has_kind = bool(row and (row[0] if not isinstance(row, dict)
+                                     else list(row.values())[0]))
+            if not has_kind:
+                cur.execute("DELETE FROM auto_playlist_log")
+                cur.execute(
+                    "ALTER TABLE auto_playlist_log "
+                    "ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'absent'"
+                )
+                log.info("auto_playlist_log migrated: cleared legacy rows "
+                         "(the live playlist is now the source of truth)")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS album_overrides ("
                 " artist VARCHAR(255) NOT NULL,"

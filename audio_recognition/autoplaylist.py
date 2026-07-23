@@ -110,6 +110,7 @@ _flush_lock = threading.Lock()
 _backoff_until: dict[str, float] = {}   # service -> epoch seconds to resume
 _consec_fail: dict[str, int] = {}       # service -> consecutive-error count
 _PEAK = {"n": 0}                        # high-water queue depth, for the progress bar
+_last_backfill: dict = {}               # breakdown from the last Sync all heard
 
 # Live playlist membership, read from each service and cached briefly. This is
 # the source of truth for "is the track already in the playlist" -- NOT our own
@@ -302,23 +303,41 @@ def note_played(artist: str, title: str, album: str = None) -> None:
 
 def backfill() -> int:
     """Queue every distinct track already in the archive (that isn't handled yet)
-    for the enabled services. Returns how many (service, track) items were queued."""
+    for the enabled services. Returns how many (service, track) items were queued;
+    a breakdown of what was skipped is left in last_backfill_stats()."""
+    global _last_backfill
     svcs = _enabled_services()
     if not svcs:
+        _last_backfill = {"queued": 0, "reason": "no service is enabled"}
         return 0
     queued = 0
+    considered = below = in_playlist = absent = 0
     threshold = max(1, int(config.AUTO_PLAYLIST_MIN_PLAYS))
     name = config.AUTO_PLAYLIST_NAME
     for r in db.distinct_tracks_for_backfill():
+        considered += 1
         if int(r.get("plays") or 0) < threshold:
+            below += 1
             continue
         key = _key(r["artist"], r["title"])
         for svc in svcs:
             if _in_playlist(svc, name, key):
+                in_playlist += 1
                 continue
             if db.autoplaylist_seen(svc, key):
+                absent += 1
                 continue
             db.autoplaylist_enqueue(svc, key, r["artist"], r["title"], r.get("album"))
             queued += 1
-    log.info("Auto-playlist backfill queued %d item(s)", queued)
+    _last_backfill = {"queued": queued, "considered": considered,
+                      "below_threshold": below, "already_in_playlist": in_playlist,
+                      "not_on_service": absent, "min_plays": threshold}
+    log.info("Auto-playlist backfill queued %d item(s) "
+             "(%d tracks seen, %d under %d plays, %d already in playlist, "
+             "%d not on the service)",
+             queued, considered, below, threshold, in_playlist, absent)
     return queued
+
+
+def last_backfill_stats() -> dict:
+    return dict(_last_backfill)
