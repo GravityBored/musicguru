@@ -508,6 +508,22 @@ def get_library_link(artist: str, title: str, backend: str = "plex"):
         return None
 
 
+def get_all_library_links(backend: str = "plex") -> dict:
+    """Every manual assignment at once, keyed by (artist, title). Matching runs
+    concurrently across many tracks, so a per-track query exhausted the pool."""
+    out = {}
+    try:
+        with _cursor(dictionary=True) as (_c, cur):
+            cur.execute("SELECT artist, title, item_key, item_label "
+                        "FROM library_links WHERE backend=%s", (backend,))
+            for r in cur.fetchall() or []:
+                out[(r["artist"], r["title"])] = {"item_key": r["item_key"],
+                                                  "item_label": r.get("item_label")}
+    except mysql.connector.Error as e:
+        log.warning("get_all_library_links failed: %s", e)
+    return out
+
+
 def set_library_link(artist: str, title: str, item_key: str,
                      item_label: str = None, backend: str = "plex") -> None:
     try:

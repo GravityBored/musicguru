@@ -191,14 +191,16 @@ def _is_unavailable(e: Exception) -> bool:
     """A service being unreachable (vs. a genuine per-track failure). These never
     count against a track's attempt budget -- the service will come back."""
     from .plex.client import PlexUnavailable
-    if isinstance(e, PlexUnavailable):
+    from .services.tidal import TidalUnavailable
+    from .services.spotify import SpotifyUnavailable
+    if isinstance(e, (PlexUnavailable, TidalUnavailable, SpotifyUnavailable)):
         return True
     txt = f"{type(e).__name__}: {e}".lower()
     return any(k in txt for k in (
         "connection", "timeout", "timed out", "unreachable", "refused",
         "reset by peer", "temporarily unavailable", "bad gateway",
-        "service unavailable", "not connected", "502", "503", "504",
-        "429", "too many requests", "rate limit",
+        "service unavailable", "not connected", "500", "502", "503", "504",
+        "server error", "429", "too many requests", "rate limit",
     ))
 
 
@@ -256,8 +258,10 @@ def _drain_service(svc: str, name: str) -> tuple:
                 log.warning("Auto-playlist %s failed for %s - %s (will retry): %s",
                             svc, row["artist"], row["title"], e)
             break   # back off rather than keep hitting a struggling service
-    if not errored and (added or present or skipped):
-        _consec_fail[svc] = 0   # clean pass -> reset backoff escalation
+    if added or present or skipped:
+        # Progress was made, so don't let intermittent 5xx escalate the backoff
+        # all the way to the 15-minute cap while the drain is actually working.
+        _consec_fail[svc] = 0
     return added, present, skipped, deferred, errored
 
 

@@ -189,7 +189,9 @@ DB_CONFIG = {
     "password": os.getenv("AR_DB_PASSWORD"),  # required, no default
     "database": os.getenv("AR_DB_NAME", "music_log"),
 }
-DB_POOL_SIZE = _env_int("AR_DB_POOL_SIZE", 5)
+# Matching runs PLEX_CONCURRENCY threads; the pool has to exceed that or
+# lookups fail with "pool exhausted".
+DB_POOL_SIZE = _env_int("AR_DB_POOL_SIZE", 16)
 # recognized_at is written with UTC_TIMESTAMP() by save_track(), so rows are
 # unambiguously UTC regardless of the MySQL server's time_zone setting.
 # Set to 0 only if you have legacy rows written in server-local time.

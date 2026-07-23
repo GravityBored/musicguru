@@ -226,11 +226,7 @@ def _match(artist: str, title: str, album: str = None) -> dict | None:
         return None
 
     # A manual assignment wins over any search heuristics.
-    try:
-        from ..storage.db import get_library_link
-        link = get_library_link(artist, title)
-    except Exception:
-        link = None
+    link = _link_for(artist, title)
     if link and link.get("item_key"):
         try:
             tr = _srv.fetchItem(int(link["item_key"]))
@@ -463,11 +459,34 @@ def search_candidates(query: str, limit: int = 25) -> list:
     return out
 
 
+_links: dict | None = None      # (artist, title) -> link row; loaded once
+
+
+def _link_for(artist: str, title: str):
+    """Manual assignment for this track, from a single cached query. _match runs
+    on many threads at once, so a per-call DB lookup drained the pool."""
+    global _links
+    if _links is None:
+        try:
+            from ..storage.db import get_all_library_links
+            _links = get_all_library_links()
+        except Exception as e:
+            log.debug("library link load failed: %s", e)
+            _links = {}
+    return _links.get((artist, title))
+
+
+def clear_link_cache() -> None:
+    global _links
+    _links = None
+
+
 def clear_match_cache() -> int:
     """Forget cached match results so lookups re-run (e.g. after a matching
     improvement, or to re-check the want-list). Returns entries cleared."""
     n = len(_cache)
     _cache.clear()
+    clear_link_cache()
     return n
 
 

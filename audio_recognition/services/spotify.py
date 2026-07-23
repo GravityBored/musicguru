@@ -88,16 +88,23 @@ def search_uri(sp, artist: str, title: str, album: str = None) -> str | None:
     """Best Spotify track URI for (artist, title), preferring a given album."""
     want_t, want_a, want_al = _norm(title), _norm(artist), (_norm(album) if album else "")
     items = []
+    attempted = failed = 0
+    last_err = None
     for q in (f'track:{_clean(title)} artist:{_cleanname(artist)}',
               f'{_cleanname(artist)} {_clean(title)}'.strip(),
               _clean(title)):
+        attempted += 1
         try:
             items = sp.search(q=q, type="track", limit=8)["tracks"]["items"]
         except Exception as e:
+            failed += 1
+            last_err = e
             log.debug("Spotify search failed (%s): %s", q, e)
             items = []
         if items:
             break
+    if not items and attempted and failed == attempted:
+        raise SpotifyUnavailable(f"search failed for {artist} - {title}: {last_err}")
     matches = []
     for it in items:
         arts = [_norm(a.get("name", "")) for a in it.get("artists", [])]
@@ -143,6 +150,11 @@ def create_playlist(name: str, tracks: list) -> dict:
         sp.playlist_add_items(pl["id"], uris[i:i + 100])
     return {"created": True, "url": pl["external_urls"]["spotify"],
             "added": len(uris), "skipped": skipped}
+
+
+class SpotifyUnavailable(Exception):
+    """Spotify itself failed (5xx, rate limit, network) -- not evidence that the
+    track is missing, so callers retry rather than writing it off."""
 
 
 _pl_cache: dict[str, str] = {}   # playlist name -> id (auto-playlist)

@@ -189,10 +189,17 @@ def search_id(session, artist: str, title: str, album: str = None) -> str | None
     """Best Tidal track id for (artist, title), preferring a given album."""
     want_a, want_al = _norm(artist), (_norm(album) if album else "")
     matches = []
-    for q in (f"{_cleanname(artist)} {_clean(title)}".strip(), _clean(title)):
+    queries = [q for q in (f"{_cleanname(artist)} {_clean(title)}".strip(),
+                           _clean(title)) if q]
+    attempted = failed = 0
+    last_err = None
+    for q in queries:
+        attempted += 1
         try:
             results = session.search(q, limit=10)
         except Exception as e:
+            failed += 1
+            last_err = e
             log.debug("Tidal search failed (%s): %s", q, e)
             continue
         for tr in _tracks_from(results):
@@ -211,6 +218,10 @@ def search_id(session, artist: str, title: str, album: str = None) -> str | None
         if matches:
             break
     if not matches:
+        if attempted and failed == attempted:
+            # Every query errored (e.g. Tidal 500s) -- we have NO evidence the
+            # track is missing, so don't let the caller record it as absent.
+            raise TidalUnavailable(f"search failed for {artist} - {title}: {last_err}")
         return None
     if want_al:
         for tr in matches:
@@ -243,6 +254,11 @@ def create_playlist(name: str, tracks: list) -> dict:
         pl.add(ids[i:i + 100])
     return {"created": True, "url": f"https://tidal.com/browse/playlist/{pl.id}",
             "added": len(ids), "skipped": skipped}
+
+
+class TidalUnavailable(Exception):
+    """Tidal itself failed (5xx, rate limit, network). Distinct from 'the track
+    isn't in the catalogue', so callers retry instead of writing it off."""
 
 
 _pl_cache: dict[str, str] = {}   # playlist name -> playlist id (auto-playlist)
