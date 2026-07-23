@@ -106,7 +106,6 @@ def enqueue(artist: str, title: str, album: str = None, plays: int = None) -> No
 import threading
 import time
 
-_flush_lock = threading.Lock()
 _backoff_until: dict[str, float] = {}   # service -> epoch seconds to resume
 _consec_fail: dict[str, int] = {}       # service -> consecutive-error count
 _PEAK = {"n": 0}                        # high-water queue depth, for the progress bar
@@ -217,8 +216,12 @@ def _drain_service(svc: str, name: str) -> tuple:
                                          _batch_for(svc), service=svc)
     added = present = skipped = deferred = 0
     errored = False
+    if rows:
+        log.debug("Auto-playlist: draining %d %s row(s)", len(rows), svc)
     for row in rows:
         key = row["match_key"]
+        _svc_started[svc] = (_svc_started.get(svc, (time.time(), ""))[0],
+                             f"{row['artist']} - {row['title']}")
         try:
             status = _add_one(svc, name, row["artist"], row["title"], row.get("album"))
             db.autoplaylist_queue_remove(svc, key)
@@ -258,38 +261,108 @@ def _drain_service(svc: str, name: str) -> tuple:
     return added, present, skipped, deferred, errored
 
 
+_svc_locks: dict = {}                   # service -> lock (per service, so one
+                                        # hung service can't freeze the others)
+_svc_started: dict = {}                 # service -> (epoch, step) of a running drain
+_ready_cache: dict = {}                 # service -> (bool, checked_epoch)
+_READY_TTL = 30                         # don't re-probe connectivity every cycle
+_last_idle_report = {"t": 0.0}
+
+
+def _lock_for(svc: str):
+    lk = _svc_locks.get(svc)
+    if lk is None:
+        lk = _svc_locks[svc] = threading.Lock()
+    return lk
+
+
+def _service_ready_cached(svc: str) -> bool:
+    """_service_ready can do network I/O (Tidal/Spotify session checks), so cache
+    it briefly and never let an exception look like 'not enabled'."""
+    now = time.time()
+    hit = _ready_cache.get(svc)
+    if hit and now - hit[1] < _READY_TTL:
+        return hit[0]
+    try:
+        ok = bool(_service_ready(svc))
+    except Exception as e:
+        log.warning("Auto-playlist: readiness check for %s failed: %s", svc, e)
+        ok = False
+    _ready_cache[svc] = (ok, now)
+    return ok
+
+
+def _report_idle(reasons: dict) -> None:
+    """If there's queued work but nothing drained, say so -- at most once a
+    minute. Silence used to be the only symptom of a stuck drain."""
+    now = time.time()
+    if now - _last_idle_report["t"] < 60:
+        return
+    try:
+        depth = db.autoplaylist_queue_depth()
+    except Exception:
+        return
+    if not depth:
+        return
+    _last_idle_report["t"] = now
+    log.warning("Auto-playlist: %d queued but nothing drained -- %s", depth,
+                "; ".join(f"{k}: {v}" for k, v in sorted(reasons.items())) or "no enabled service")
+
+
 def flush(limit: int = 25) -> int:
     """Drain queued adds for each ready service. Plex drains a large chunk each
     cycle (as fast as the network allows); Tidal drains a smaller burst and backs
-    off when it hits an error. Single-run: overlapping calls no-op. Returns tracks
-    added this cycle."""
-    if not _flush_lock.acquire(blocking=False):
-        return 0
-    try:
-        name = config.AUTO_PLAYLIST_NAME
-        added = present = skipped = deferred = 0
-        for svc in _enabled_services():
-            if not _service_ready(svc) or _in_backoff(svc):
-                continue
+    off when it hits an error.
+
+    Each service has its OWN lock, so a call that hangs against one service can't
+    stop the others -- and a drain that overruns is reported rather than silently
+    skipped.
+    """
+    name = config.AUTO_PLAYLIST_NAME
+    added = present = skipped = deferred = 0
+    reasons: dict = {}
+    for svc in _enabled_services():
+        if not _service_ready_cached(svc):
+            reasons[svc] = "not connected/configured"
+            continue
+        if _in_backoff(svc):
+            reasons[svc] = f"backing off for {int(_backoff_until[svc] - time.time())}s"
+            continue
+        lk = _lock_for(svc)
+        if not lk.acquire(blocking=False):
+            started, step = _svc_started.get(svc, (time.time(), "?"))
+            held = int(time.time() - started)
+            reasons[svc] = f"a drain has been running {held}s (at: {step})"
+            if held > 120:
+                log.warning("Auto-playlist: %s drain stuck for %ds at '%s' -- "
+                            "the service call isn't returning", svc, held, step)
+            continue
+        _svc_started[svc] = (time.time(), "starting")
+        try:
             a, p, s, d, errored = _drain_service(svc, name)
             added += a; present += p; skipped += s; deferred += d
             if errored:
                 _note_error(svc)
-        if added or present or skipped or deferred:
-            remaining = db.autoplaylist_queue_depth()
-            done = _peak_queue(remaining + added + present + skipped) - remaining
-            log.info("flush  +%d added  =%d already-in  -%d not-found  ~%d deferred",
-                     added, present, skipped, deferred)
-            log.info("queue  %s", logging_setup.bar(done, _PEAK["n"]))
-        return added
-    finally:
-        _flush_lock.release()
+            elif not (a or p or s):
+                reasons[svc] = "no queued rows for this service"
+        finally:
+            _svc_started.pop(svc, None)
+            lk.release()
+    if added or present or skipped or deferred:
+        remaining = db.autoplaylist_queue_depth()
+        done = _peak_queue(remaining + added + present + skipped) - remaining
+        log.info("flush  +%d added  =%d already-in  -%d not-found  ~%d deferred",
+                 added, present, skipped, deferred)
+        log.info("queue  %s", logging_setup.bar(done, _PEAK["n"]))
+    else:
+        _report_idle(reasons)
+    return added
 
 
 def has_pending() -> bool:
     """Whether any queued item is ready to attempt now (used to pace the worker)."""
     for svc in _enabled_services():
-        if _service_ready(svc) and not _in_backoff(svc):
+        if _service_ready_cached(svc) and not _in_backoff(svc):
             if db.autoplaylist_queue_pending(config.AUTO_PLAYLIST_MAX_ATTEMPTS, 1, service=svc):
                 return True
     return False
