@@ -158,6 +158,12 @@
     <span class="opt">{% if status.autoplaylist.enabled %}“{{ status.autoplaylist.name }}” → {{ status.autoplaylist.targets|join(', ') or 'connect a service' }}{% if status.autoplaylist.min_plays > 1 %} · after {{ status.autoplaylist.min_plays }} plays{% endif %}{% if status.autoplaylist.queued %} · {{ status.autoplaylist.queued }} queued{% endif %}{% else %}enable per service below{% endif %}</span>
     {% if status.autoplaylist.enabled %}<button type="button" class="btn" id="apBackfill" style="margin-left:10px;">Sync all heard</button>{% endif %}
   </div>
+  {% if status.autoplaylist.enabled %}
+  <div class="row" id="apLiveRow">
+    <span class="name"></span>
+    <span class="opt" id="apLive" style="color:var(--ink-dim);">checking the queue…</span>
+  </div>
+  {% endif %}
 
   {% if not status.spotify.configured %}
   <h2>Set up Spotify</h2>
@@ -214,6 +220,39 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
       else if (s === "failed") { f.className = "flash bad"; f.textContent = "Spotify authorization failed — check your app credentials and redirect URI."; }
     }
 
+    // Live auto-playlist drain state -- so "nothing is happening" is visible
+    // rather than something you have to read the log to discover.
+    var apLive = document.getElementById("apLive");
+    if (apLive) {
+      var apPrev = null;
+      function apPoll() {
+        fetch(authed("/api/autoplaylist/status"))
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            var bits = [];
+            Object.keys(j.services || {}).forEach(function (k) {
+              var v = j.services[k], t = k + ": " + v.state;
+              if (v.queued) t += " (" + v.queued + " queued)";
+              if (v.state === "draining" && v.working_on) t += " — " + v.working_on;
+              if (v.state === "backing off") t += " " + v.backoff_sec + "s";
+              if (v.last_error && v.state !== "draining") t += " — " + v.last_error;
+              bits.push(t);
+            });
+            var line = (j.total_queued ? j.total_queued + " queued · " : "queue empty · ")
+                     + bits.join(" · ");
+            // Show whether the number is actually moving.
+            if (apPrev !== null && j.total_queued < apPrev) {
+              line += "  ▼ draining (-" + (apPrev - j.total_queued) + ")";
+            }
+            apPrev = j.total_queued;
+            apLive.textContent = line;
+          })
+          .catch(function () { apLive.textContent = "couldn't read the queue state"; });
+      }
+      apPoll();
+      setInterval(apPoll, 5000);
+    }
+
     // Display test card
     var dispBtn = document.getElementById("dispTest");
     if (dispBtn) {
@@ -253,7 +292,19 @@ AR_SPOTIFY_REDIRECT_URI=http://&lt;this-host&gt;:8000/spotify/callback</pre>
               alert("Nothing to queue" + (bits.length ? " — " + bits.join(", ") + "." : ".")
                     + (j.considered ? " (" + j.considered + " distinct tracks checked)" : ""));
             }
-            setTimeout(function () { apBtn.textContent = "Sync all heard"; }, 6000);
+            // Don't just revert -- say what's outstanding, and refresh the live
+            // line immediately so you can see it start draining.
+            if (typeof apPoll === "function") apPoll();
+            setTimeout(function () {
+              fetch(authed("/api/autoplaylist/status"))
+                .then(function (r) { return r.json(); })
+                .then(function (st) {
+                  apBtn.textContent = st.total_queued
+                    ? "Sync all heard (" + st.total_queued + " queued)"
+                    : "Sync all heard";
+                })
+                .catch(function () { apBtn.textContent = "Sync all heard"; });
+            }, 4000);
           })
           .catch(function () { apBtn.textContent = "Sync all heard"; apBtn.disabled = false; });
       });

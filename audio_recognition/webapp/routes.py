@@ -541,6 +541,11 @@ def autoplaylist_backfill():
     return jsonify({"queued": queued, **stats})
 
 
+@bp.route("/api/autoplaylist/status")
+def autoplaylist_status():
+    return jsonify(autoplaylist.status())
+
+
 @bp.route("/api/plex/search")
 def plex_search():
     """Candidate Plex tracks for the manual want-list assignment picker."""

@@ -430,5 +430,39 @@ def backfill() -> int:
     return queued
 
 
+def status() -> dict:
+    """Live view of the drain, so 'nothing is happening' is always explainable."""
+    now = time.time()
+    per = db.autoplaylist_queue_by_service()
+    svcs = {}
+    for svc in _enabled_services():
+        info = dict(per.get(svc, {"queued": 0}))
+        ready = _service_ready_cached(svc)
+        left = int(_backoff_until.get(svc, 0) - now)
+        running = _svc_started.get(svc)
+        info.update({
+            "ready": ready,
+            "backoff_sec": max(0, left),
+            "last_error": _last_error.get(svc),
+            "working_on": running[1] if running else None,
+            "running_for": int(now - running[0]) if running else 0,
+        })
+        if running:
+            info["state"] = "draining"
+        elif not ready:
+            info["state"] = "not connected"
+        elif left > 0:
+            info["state"] = "backing off"
+        elif info.get("queued"):
+            info["state"] = "waiting"
+        else:
+            info["state"] = "idle"
+        svcs[svc] = info
+    return {"total_queued": sum(v.get("queued", 0) for v in per.values()),
+            "services": svcs,
+            "playlist": config.AUTO_PLAYLIST_NAME,
+            "min_plays": int(config.AUTO_PLAYLIST_MIN_PLAYS)}
+
+
 def last_backfill_stats() -> dict:
     return dict(_last_backfill)

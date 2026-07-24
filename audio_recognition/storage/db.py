@@ -479,6 +479,23 @@ def autoplaylist_queue_depth() -> int:
         return 0
 
 
+def autoplaylist_queue_by_service() -> dict:
+    """Queue depth per service, split into ready-to-try vs exhausted, so the UI
+    can say which service is holding things up."""
+    out = {}
+    try:
+        with _cursor(dictionary=True) as (_c, cur):
+            cur.execute("SELECT service, COUNT(*) c, MIN(attempts) mn, MAX(attempts) mx "
+                        "FROM auto_playlist_queue GROUP BY service")
+            for r in cur.fetchall() or []:
+                out[r["service"]] = {"queued": int(r["c"]),
+                                     "min_attempts": int(r["mn"] or 0),
+                                     "max_attempts": int(r["mx"] or 0)}
+    except mysql.connector.Error as e:
+        log.warning("autoplaylist_queue_by_service failed: %s", e)
+    return out
+
+
 def distinct_tracks_for_backfill(cap: int = 0) -> list[dict]:
     """Distinct (artist, title, album) across the archive -- to seed the queue
     with everything already heard."""
