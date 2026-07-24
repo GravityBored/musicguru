@@ -136,3 +136,4 @@ AR_AUTO_PLAYLIST_PLEX=0
 # AR_WANTLIST_MAX=0          # 0 = return every confirmed miss (no cap)
 # AR_AUTO_PLAYLIST_MIN_PLAYS=1   # only add a track after it's been heard this many times
 # AR_DB_POOL_SIZE=16     # must exceed AR_PLEX_CONCURRENCY or lookups hit "pool exhausted"
+# AR_PLEX_TIMEOUT=30     # seconds; searches on a large library can be slow

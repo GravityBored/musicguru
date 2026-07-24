@@ -175,6 +175,36 @@ def _title_variants(title: str) -> list:
     return out
 
 
+_artist_cache: dict = {}          # normalized artist -> (tracks, fetched_epoch)
+_ARTIST_TTL = 900
+
+
+def _artist_tracks(section, artist: str) -> list:
+    """Every track Plex has for an artist, cached briefly. Raises PlexUnavailable
+    if Plex can't be reached."""
+    key = _norm(artist)
+    hit = _artist_cache.get(key)
+    if hit and time.time() - hit[1] < _ARTIST_TTL:
+        return hit[0]
+    out = []
+    try:
+        for art in section.searchArtists(title=(_query_name(artist) or artist),
+                                         maxresults=3):
+            try:
+                out.extend(art.tracks() or [])
+            except Exception as e:
+                if _is_conn_error(e):
+                    raise PlexUnavailable(str(e))
+    except PlexUnavailable:
+        raise
+    except Exception as e:
+        if _is_conn_error(e):
+            raise PlexUnavailable(str(e))
+        log.debug("Plex artist track fetch failed: %s", e)
+    _artist_cache[key] = (out, time.time())
+    return out
+
+
 def _fuzzy(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
@@ -199,16 +229,13 @@ def _search(section, title: str, artist: str = None):
                 log.debug("Plex track search variant failed: %s", e)
 
     # Last resort: pull the artist's tracks and fuzzy-match locally. This is what
-    # catches recognizer typos like "Schissm" -> "Schism".
+    # catches recognizer typos like "Schissm" -> "Schism". It's expensive, so the
+    # per-artist track list is cached -- draining a queue full of one artist used
+    # to re-fetch their whole catalogue for every single track, which is what
+    # pushed reads past the timeout.
     if artist:
         try:
-            for art in section.searchArtists(title=(_query_name(artist) or artist),
-                                             maxresults=3):
-                try:
-                    hits.extend(art.tracks())
-                except Exception as e:
-                    if _is_conn_error(e):
-                        raise PlexUnavailable(str(e))
+            hits = _artist_tracks(section, artist)
             if hits:
                 return hits
         except PlexUnavailable:
@@ -507,6 +534,7 @@ def clear_match_cache() -> int:
     improvement, or to re-check the want-list). Returns entries cleared."""
     n = len(_cache)
     _cache.clear()
+    _artist_cache.clear()
     clear_link_cache()
     return n
 

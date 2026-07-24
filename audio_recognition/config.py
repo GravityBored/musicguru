@@ -200,7 +200,9 @@ DB_TIMES_ARE_UTC = _env_bool("AR_DB_TIMES_ARE_UTC", True)
 # --- plex ----------------------------------------------------------------
 PLEX_BASE_URL = os.getenv("AR_PLEX_BASE_URL", "").rstrip("/")
 PLEX_TOKEN = os.getenv("AR_PLEX_TOKEN")  # required for playlists, no default
-PLEX_TIMEOUT = _env_float("AR_PLEX_TIMEOUT", 8.0)
+# Searches on a large library can legitimately take a while, especially with
+# several matching threads in flight; 8s produced spurious read timeouts.
+PLEX_TIMEOUT = _env_float("AR_PLEX_TIMEOUT", 30.0)
 PLEX_MUSIC_TYPE = 10  # Plex metadata type id for "track"
 # Verify TLS. Turn OFF when pointing at https://<ip>:32400, since Plex's
 # *.plex.direct certificate won't validate against a bare IP.
