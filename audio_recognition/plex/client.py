@@ -20,6 +20,7 @@ Diagnostic:
 import difflib
 import logging
 import re
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 
@@ -48,16 +49,20 @@ _cache: dict[tuple[str, str], dict | None] = {}
 _server = None
 _section = None
 _connect_tried = False
+_connect_failed_at = 0.0        # when the last connect attempt failed
+_RECONNECT_AFTER = 30           # seconds before trying to reconnect
 
 
 def reset() -> None:
     """Drop the cached connection and match cache so a credential change (after a
     config reload) reconnects with the new base URL/token."""
-    global _server, _section, _connect_tried
+    global _server, _section, _connect_tried, _connect_failed_at
     _server = None
     _section = None
     _connect_tried = False
+    _connect_failed_at = 0.0
     _cache.clear()
+    clear_link_cache()
 
 
 def configured() -> bool:
@@ -90,20 +95,31 @@ def _session() -> requests.Session:
 
 
 def connect():
-    """Connect and resolve the music section once. Returns (server, section) or
-    (None, None). Cached; safe to call repeatedly."""
-    global _server, _section, _connect_tried
-    if _connect_tried:
+    """Connect and resolve the music section. Returns (server, section) or
+    (None, None). A SUCCESSFUL connection is cached; a FAILED one is only cached
+    briefly -- otherwise a single blip (Plex restarting, a DNS hiccup) would
+    poison the client for the life of the process and every later lookup would
+    report Plex as unreachable while it was actually fine."""
+    global _server, _section, _connect_tried, _connect_failed_at
+    if _server is not None:
         return _server, _section
-    _connect_tried = True
     if not configured():
         return None, None
+    since = time.time() - _connect_failed_at
+    if _connect_failed_at and since < _RECONNECT_AFTER:
+        return None, None          # still cooling off from the last failure
+    _connect_tried = True
     try:
         from plexapi.server import PlexServer
         _server = PlexServer(_base_url(), config.PLEX_TOKEN, session=_session(),
                              timeout=int(config.PLEX_TIMEOUT))
+        if _connect_failed_at:
+            log.info("Plex reconnected (%s)", _base_url())
+        _connect_failed_at = 0.0
     except Exception as e:
-        log.warning("Plex connect failed (%s): %s", _base_url(), e)
+        _connect_failed_at = time.time()
+        log.warning("Plex connect failed (%s): %s -- retrying in %ds",
+                    _base_url(), e, _RECONNECT_AFTER)
         _server = None
         return None, None
     try:
@@ -118,6 +134,11 @@ def connect():
     except Exception as e:
         log.warning("Plex section lookup failed: %s", e)
         _section = None
+    if _section is None:
+        # A server with no usable music section is not a working connection --
+        # drop it so the next call genuinely retries.
+        _server = None
+        _connect_failed_at = time.time()
     return _server, _section
 
 

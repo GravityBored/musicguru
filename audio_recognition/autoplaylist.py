@@ -176,12 +176,20 @@ def _backoff_base(svc: str) -> int:
     return 10 if svc == "plex" else config.AUTO_PLAYLIST_TIDAL_BACKOFF_SEC
 
 
+def _backoff_max(svc: str) -> int:
+    """Plex is on the LAN, so a long penalty makes no sense -- a local server
+    that's briefly unreachable is back in seconds, not a quarter of an hour."""
+    if svc == "plex":
+        return 120
+    return config.AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC
+
+
 def _note_error(svc: str) -> None:
     """Escalating backoff after an error response (rate limits, server down)."""
     n = _consec_fail.get(svc, 0) + 1
     _consec_fail[svc] = n
     base = _backoff_base(svc)
-    wait = min(base * (2 ** (n - 1)), config.AUTO_PLAYLIST_TIDAL_BACKOFF_MAX_SEC)
+    wait = min(base * (2 ** (n - 1)), _backoff_max(svc))
     _backoff_until[svc] = time.time() + wait
     log.warning("Auto-playlist: backing off %s for %ds after an error (streak %d)",
                 svc, wait, n)
@@ -247,6 +255,7 @@ def _drain_service(svc: str, name: str) -> tuple:
         except Exception as e:
             deferred += 1
             errored = True
+            _last_error[svc] = f"{type(e).__name__}: {e}"[:200]
             if _is_unavailable(e):
                 # Service is down/rate-limited: leave the attempt count alone so a
                 # long outage never exhausts a track's retries. It'll be picked up
@@ -262,6 +271,8 @@ def _drain_service(svc: str, name: str) -> tuple:
         # Progress was made, so don't let intermittent 5xx escalate the backoff
         # all the way to the 15-minute cap while the drain is actually working.
         _consec_fail[svc] = 0
+        if not errored:
+            _last_error.pop(svc, None)
     return added, present, skipped, deferred, errored
 
 
@@ -271,6 +282,7 @@ _svc_started: dict = {}                 # service -> (epoch, step) of a running 
 _ready_cache: dict = {}                 # service -> (bool, checked_epoch)
 _READY_TTL = 30                         # don't re-probe connectivity every cycle
 _last_idle_report = {"t": 0.0}
+_last_error: dict = {}                   # service -> last error text
 
 
 def _lock_for(svc: str):
@@ -330,7 +342,9 @@ def flush(limit: int = 25) -> int:
             reasons[svc] = "not connected/configured"
             continue
         if _in_backoff(svc):
-            reasons[svc] = f"backing off for {int(_backoff_until[svc] - time.time())}s"
+            why = _last_error.get(svc)
+            reasons[svc] = (f"backing off for {int(_backoff_until[svc] - time.time())}s"
+                            + (f" after: {why}" if why else ""))
             continue
         lk = _lock_for(svc)
         if not lk.acquire(blocking=False):
