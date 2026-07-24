@@ -224,11 +224,14 @@ def playlist_membership(name: str) -> set:
                     keys.add(f"{norm(a)}|{norm(nm)}")
             res = sp.next(res) if res.get("next") else None
     except Exception as e:
-        log.debug("Spotify membership read failed: %s", e)
+        raise SpotifyUnavailable(f"membership read failed: {e}")
     return keys
 
 
 def _playlist_id_if_exists(sp, name: str):
+    """The playlist's id, or None if it genuinely isn't there. Raises
+    SpotifyUnavailable if the listing failed -- otherwise "couldn't ask" would be
+    read as "doesn't exist" and we'd create a duplicate playlist."""
     if name in _pl_cache:
         return _pl_cache[name]
     try:
@@ -241,7 +244,7 @@ def _playlist_id_if_exists(sp, name: str):
                     return pl["id"]
             page = sp.next(page) if page.get("next") else None
     except Exception as e:
-        log.debug("Spotify playlist lookup failed: %s", e)
+        raise SpotifyUnavailable(f"playlist listing failed: {e}")
     return None
 
 

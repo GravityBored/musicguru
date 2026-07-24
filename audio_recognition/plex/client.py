@@ -568,9 +568,7 @@ def playlist_membership(title: str) -> set:
                         keys.add(f"{norm(a)}|{norm(t)}")
                 break
     except Exception as e:
-        if _is_conn_error(e):
-            raise PlexUnavailable(str(e))
-        log.debug("Plex membership read failed: %s", e)
+        raise PlexUnavailable(f"membership read failed: {e}")
     return keys
 
 
@@ -597,7 +595,9 @@ def create_or_append_playlist(title: str, rating_keys: list) -> dict:
                 existing = pl
                 break
     except Exception as e:
-        log.debug("Plex playlist list failed: %s", e)
+        # "Couldn't ask" is not "doesn't exist" -- falling through to create
+        # would leave a second playlist with the same name.
+        raise PlexUnavailable(f"playlist listing failed: {e}")
 
     if existing is not None:
         # Skip items already in the playlist.
