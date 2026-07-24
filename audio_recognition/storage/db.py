@@ -349,6 +349,14 @@ def ensure_schema() -> None:
                 " PRIMARY KEY (artist, title))"
             )
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS app_state ("
+                " k VARCHAR(191) NOT NULL,"
+                " v TEXT,"
+                " updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                " ON UPDATE CURRENT_TIMESTAMP,"
+                " PRIMARY KEY (k))"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS library_links ("
                 " artist VARCHAR(255) NOT NULL,"
                 " title VARCHAR(255) NOT NULL,"
@@ -523,6 +531,35 @@ def get_library_link(artist: str, title: str, backend: str = "plex"):
     except mysql.connector.Error as e:
         log.warning("get_library_link failed: %s", e)
         return None
+
+
+def state_get(key: str):
+    try:
+        with _cursor(dictionary=True) as (_c, cur):
+            cur.execute("SELECT v FROM app_state WHERE k=%s", (key[:191],))
+            r = cur.fetchone()
+            return r["v"] if r else None
+    except mysql.connector.Error:
+        return None
+
+
+def state_set(key: str, value: str) -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute("INSERT INTO app_state (k, v) VALUES (%s,%s) "
+                        "ON DUPLICATE KEY UPDATE v=VALUES(v)", (key[:191], value))
+            conn.commit()
+    except mysql.connector.Error as e:
+        log.warning("state_set failed: %s", e)
+
+
+def state_del(key: str) -> None:
+    try:
+        with _cursor() as (conn, cur):
+            cur.execute("DELETE FROM app_state WHERE k=%s", (key[:191],))
+            conn.commit()
+    except mysql.connector.Error:
+        pass
 
 
 def get_all_library_links(backend: str = "plex") -> dict:
